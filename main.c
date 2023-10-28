@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include "guru.h"
 #include "bytecode.h"
-#include "debug.h"
 #include "value.h"
 #include "vm.h"
 

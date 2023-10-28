@@ -1,8 +1,6 @@
 #include "vm.h"
-#include "blobs.h"
 #include "bytecode.h"
 #include "compiler.h"
-#include "debug.h"
 #include "guru.h"
 #include "value.h"
 #include <stdarg.h>

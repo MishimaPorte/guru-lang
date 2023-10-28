@@ -1,5 +1,4 @@
 #include "compiler.h"
-#include "blobs.h"
 #include "bytecode.h"
 #include "scanner.h"
 #include "value.h"
