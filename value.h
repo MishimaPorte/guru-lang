@@ -10,6 +10,7 @@
 #include "stddef.h"
 
 #define __INITIAL_BLOB_PIT 200
+#define __INITIAL_STORAGE_PIT 1024
 
 enum guru_type {
     VAL_BOOL, VAL_NOTHING, VAL_NUMBER,
@@ -49,9 +50,12 @@ struct __the_pit {
         uint64_t cap;
         void *mem;
     } __blobs; // blob allocations like strings and literal blobs
+
+    void *storage;
 };
 static struct __the_pit pit;
 void init_pit();
+
 
 /* Some reduced malloc implementation for use by the memory allocation subsystem of the Guru
  * */

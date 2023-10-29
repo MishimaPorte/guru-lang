@@ -86,6 +86,8 @@ void init_pit() {
     pit.__blobs.__first_free_offset = 0;
     __ffb->__rc = 0;
     __ffb->len = __INITIAL_BLOB_PIT - sizeof(struct __blob_header);
+
+    pit.storage = malloc(__INITIAL_STORAGE_PIT);
 };
 
 void __gc_collect() {
