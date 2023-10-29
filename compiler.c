@@ -68,7 +68,7 @@ enum exec_code compile(const char *source, struct chunk *c) {
 // }
 static void __comp_number(struct compiler *comp) {
     double num = strtod(comp->then.lexeme, NULL);
-    uint16_t i = add_const(comp->compiled_chunk, __as_guru_numeric(num));
+    uint16_t i = add_const(comp->compiled_chunk, &num, sizeof(num), VAL_NUMBER);
     if (i>UINT8_MAX) {
         chput(comp->compiled_chunk, OP_CONST);
         chput(comp->compiled_chunk, (uint8_t) i);
@@ -101,8 +101,11 @@ static void __comp_expression(struct compiler *comp) {
     __comp_with_precedence(comp, __PREC_ASSIGNMENT);
 };
 static void __comp_string(struct compiler *comp) {
-    uint16_t i = add_const(comp->compiled_chunk, __alloc_BLOB_STRING((void *) comp->then.lexeme + 1, comp->then.len - 2));
-    if (i>UINT8_MAX) {
+    struct __blob_header *blob = __alloc_blob(comp->then.len - 2);
+    blob->len = comp->then.len - 2;
+    memcpy(blob->__cont, (void *) comp->then.lexeme + 1, comp->then.len - 2);
+    uint16_t i = add_const(comp->compiled_chunk, &blob, sizeof(blob), BLOB_STRING);
+    if (i<UINT8_MAX) {
         chput(comp->compiled_chunk, OP_CONST);
         chput(comp->compiled_chunk, (uint8_t) i);
         return;

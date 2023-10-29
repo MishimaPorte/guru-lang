@@ -29,12 +29,12 @@ struct chunk {
     uint32_t capacity;
     uint8_t *code;
     
-    struct gobj_a consts;
+    struct __consts consts;
     struct lninfo *line, *crnt_ln;
 
 };
 
-#define add_const(c, val) gdaput(&c->consts, val)
+#define add_const(c, val, s, tt) __add_const(&(c)->consts, (val), (s), (tt))
 
 void chfree(struct chunk *c);
 void chput(struct chunk *c, uint8_t opcode);

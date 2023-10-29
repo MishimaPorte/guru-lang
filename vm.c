@@ -56,74 +56,65 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
         case OP_PR_STHEAD: {
            struct __guru_object *printed = vm_st_pop(v);
            printf("printing: %f\n", printed->as.numeric);
-           __untake_obj(printed);
            break;
           };
         case OP_FLOAT_UN_PLUS: break;
         case OP_FLOAT_NEGATE: {
-           if (__get_stack_val(v, 0)->tag != VAL_NUMBER) __runtime_error(v, ip-1, "expecting number operand");
-           struct __guru_object *val = vm_st_pop(v);
-           __untake_obj(val);
-           double valnum = -val->as.numeric;
-           vm_st_push(v, __as_guru_numeric(valnum));
+           if (__get_stack_val(v, 0).tag != VAL_NUMBER) __runtime_error(v, ip-1, "expecting number operand");
+           vm_st_head(v)->as.numeric = -vm_st_head(v)->as.numeric;
            break;
           }
         case OP_LOGNOT: {
-           if (__get_stack_val(v, 0)->tag != VAL_BOOL) __runtime_error(v, ip-1, "expecting boolean operand");
-           __guru_not(*(v->stack.head-1));
+           if (__get_stack_val(v, 0).tag != VAL_BOOL) __runtime_error(v, ip-1, "expecting boolean operand");
+           if (vm_st_head(v)->as.bool) vm_st_head(v)->as.bool = 0;
+           else vm_st_head(v)->as.bool = 1;
            break;
         }
         case OP_STRING_EQ: {
-           if (__get_stack_val(v, 0)->tag != BLOB_STRING) __runtime_error(v, ip-2, "expecting string operand");
-           if (__get_stack_val(v, 1)->tag != BLOB_STRING) __runtime_error(v, ip-3, "expecting string operand");
-           struct __blob_header *l = vm_st_pop(v)->as.blob;
-           struct __blob_header *r = vm_st_pop(v)->as.blob;
-           vm_st_push(v, (l->len == r->len && !memcmp(&l->__cont[0], &r->__cont[0], l->len) ? &__GURU_TRUE : &__GURU_FALSE));
-           __untake_obj(l);
-           __untake_obj(r);
+           if (__get_stack_val(v, 0).tag != BLOB_STRING) __runtime_error(v, ip-2, "expecting string operand");
+           if (__get_stack_val(v, 1).tag != BLOB_STRING) __runtime_error(v, ip-3, "expecting string operand");
+           struct __guru_object *l = vm_st_pop(v);
+           struct __guru_object *r = vm_st_pop(v);
+           *vm_st_push(v) = (l->as.blob->len == r->as.blob->len && !memcmp(&l->as.blob->__cont[0], &r->as.blob->__cont[0], l->as.blob->len) ? __GURU_TRUE : __GURU_FALSE);
            break;
           };
         case OP_STR_CONC: {
-           if (__get_stack_val(v, 0)->tag != BLOB_STRING) __runtime_error(v, ip-2, "expecting string operand");
-           if (__get_stack_val(v, 1)->tag != BLOB_STRING) __runtime_error(v, ip-3, "expecting string operand");
+           if (__get_stack_val(v, 0).tag != BLOB_STRING) __runtime_error(v, ip-2, "expecting string operand");
+           if (__get_stack_val(v, 1).tag != BLOB_STRING) __runtime_error(v, ip-3, "expecting string operand");
            struct __guru_object *val = vm_st_pop(v);
-           struct __guru_object *head = *(v->stack.head - 1);
+           val->as.blob->__rc--;
+           struct __guru_object *head = v->stack.head - 1;
            uint64_t old_s = head->as.blob->len;
            head->as.blob = __realloc_blob(head->as.blob, head->as.blob->len + val->as.blob->len);
            memcpy(head->as.blob->__cont + old_s, val->as.blob->__cont, val->as.blob->len);
-           __untake_obj(val);
            break;
           }
         case OP_LOAD_VOID:
-           vm_st_push(v, &__GURU_VOID);
+           *vm_st_push(v) = __GURU_VOID;
            break;
         case OP_LOAD_NOTHING:
-           vm_st_push(v, &__GURU_NOTHING);
+           *vm_st_push(v) = __GURU_NOTHING;
            break;
         case OP_LOAD_TRUTH: {
            uint64_t i = 1;
-           vm_st_push(v, __alloc_VAL_BOOL(&i, 8));
+           *vm_st_push(v) = __GURU_TRUE;
            break;
                             }
         case OP_LOAD_LIES:{
            uint64_t i = 0;
-           vm_st_push(v, __alloc_VAL_BOOL(&i, 8));
+           *vm_st_push(v) = __GURU_FALSE;
            break;
                           }
         case OP_NEQ: {
            struct __guru_object *l = vm_st_pop(v);
            struct __guru_object *r = vm_st_pop(v);
-           vm_st_push(v, __val_neq(l, r));
-           __untake_obj(l);
-           __untake_obj(r);
+           *vm_st_push(v) = __val_neq(l, r);
            break;
           };
         case OP_EQ: {
            struct __guru_object *l = vm_st_pop(v);
            struct __guru_object *r = vm_st_pop(v);
-           vm_st_push(v, __val_eq(l, r));
-           __untake_obj(l);
-           __untake_obj(r);
+           *vm_st_push(v) = __val_eq(l, r);
            break;
           };
         case OP_GTE: {
@@ -160,12 +151,12 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
            break;
           };
         case OP_CONST: {
-           vm_st_push(v, c->consts.vals[*ip++]);
+           *vm_st_push(v) = c->consts.vals[*ip++];
            break;
           };
         case OP_CONST_16: {
            uint16_t i = *((uint16_t*) ip++);
-           vm_st_push(v, c->consts.vals[i]);
+           *vm_st_push(v) = c->consts.vals[i];
            ip++;
            break;
           };
@@ -175,9 +166,13 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
         default: printf("unknown opcode! %d\n", *ip);
         }
     }
-    for (struct __guru_object **o = v->stack.stack; *o != NULL; o++) {
-        printf("kek: [%d] (%d)\n", (*o)->tag, (*o)->__rc);
-    }
+    // for (struct __guru_object *o = v->stack.stack;; o++) {
+    //     printf("stack: [%d], ", o->tag);
+    //     __print_val(o);
+    //     if (o == v->stack.head) break;
+    // };
+    printf("END\n");
+    __gc_collect();
     return RESULT_OK;
 end_error:
     return RESULT_RERR;
@@ -202,7 +197,6 @@ void __print_val(struct __guru_object *val) {
              break;
         default: return;
     }
-    __untake_obj(val);
 }
 
 void repl(struct guru_vm *v) {
