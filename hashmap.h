@@ -35,7 +35,7 @@ struct hashmap {
 void set_val(struct hashmap *hm, void *key, size_t ksize, void *val);
 void unset_val(struct hashmap *hm, void *key, size_t ksize);
 void *get_val(struct hashmap *hm, void *key, size_t ksize);
-struct hashmap *init_hashmap(void *mem, size_t memsize); //need calloc'ed memory, i think??
+struct hashmap *init_hashmap(struct hashmap *hm); //need calloc'ed memory, i think??
 
 #define _val_at(hm, i) (hm->__entries + i)
 #define __max_load(hm) ((hm)->cap * __HASHMAP_ACCEPTABLE_LOAD)
