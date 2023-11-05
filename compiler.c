@@ -158,7 +158,7 @@ static void __comp_identifier(struct compiler *comp) {
         advance(comp);
         __comp_expression(comp);
         __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_ASSIGN_GLOBAL, OP_ASSIGN_GLOBAL_16);
-        __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16);
+        // __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16);
     } else {
         __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16);
     }

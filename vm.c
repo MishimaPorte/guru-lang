@@ -175,7 +175,6 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
                 return RESULT_RERR;
             };
             set_global(o.as.blob->__cont, o.as.blob->len, vm_st_head(v));
-            vm_st_pop(v);
             ip++;
             break;
         };
@@ -185,13 +184,7 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
                 __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
                 return RESULT_RERR;
             };
-            struct __guru_object *a = vm_st_pop(v);
-            struct __guru_object aw;
-            set_global(o.as.blob->__cont, o.as.blob->len, a);
-            if (!get_global(o.as.blob->__cont, o.as.blob->len, &aw)) {
-                __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
-                return RESULT_RERR;
-            };
+            set_global(o.as.blob->__cont, o.as.blob->len, vm_st_head(v));
             break;
         };
         case OP_LOAD_GLOBAL: {
