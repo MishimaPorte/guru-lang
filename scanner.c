@@ -13,6 +13,14 @@ void init_token(struct scanner *s, struct token *t, enum tokent tt) {
     *(uint32_t*)&t->line = s->line;
 };
 
+static uint8_t match(struct scanner *s, char c) {
+    if (at_end(s)) return 0;
+
+
+    if (*s->crnt != c) return 0;
+    return *s->crnt++;
+}
+
 struct scanner *scalloc(const char *src) {
     struct scanner *s = malloc(sizeof(struct scanner));
 
@@ -44,7 +52,9 @@ void scgett(struct scanner *s, struct token *t) {
     if (isdigit(c)) for (char c = *s->crnt; ; c = *++s->crnt) {
         uint8_t is_float = 1;
         if (c == '.') {
-            if (is_float || !isdigit(*(s->crnt + 1))) return ++s->crnt, init_err_token(s, t, "unterminated float literal");
+            if (is_float && !isdigit(*(s->crnt + 1)))
+                return ++s->crnt, init_err_token(s, t, "unterminated float literal");
+            continue;
             // is_float = 1;
         } else if (!isdigit(c)) return is_float ? init_token(s, t, GURU_NUMBER) : init_token(s, t, GURU_INTEGER);
 
@@ -77,7 +87,7 @@ void scgett(struct scanner *s, struct token *t) {
     case '>': return init_token(s, t, match(s, '=') ? GURU_GREATER_EQUAL : GURU_GREATER);
     case '<': return init_token(s, t, match(s, '=') ? GURU_LESS_EQUAL : GURU_LESS);
     case '"': {
-        for (char c = *++s->crnt; !at_end(s); c = *++s->crnt)
+        for (char c = *s->crnt; !at_end(s); c = *++s->crnt)
             if (match(s, '"')) return init_token(s, t, GURU_STRING);
             else if (match(s, '\n')) return init_err_token(s, t, "unterminated string literal");
         }
@@ -85,14 +95,6 @@ void scgett(struct scanner *s, struct token *t) {
 
     return init_err_token(s, t, "unknown token!");
 };
-
-static uint8_t match(struct scanner *s, char c) {
-    if (at_end(s)) return 0;
-
-
-    if (*s->crnt != c) return 0;
-    return *s->crnt++;
-}
 
 static void ident_check_kw(struct token *t, const char *rest, uint16_t offset, enum tokent tt) {
     if (t->len - offset != strlen(rest)) t->type = GURU_IDENTIFIER;
@@ -115,7 +117,13 @@ static void ident_scan_dfa(struct scanner *s, struct token *t) {
     case 'i': {ident_check_kw(t, "f", 1, GURU_IF); break;};
     case 'n': {ident_check_kw(t, "il", 1, GURU_NOTHING); break;};
     case 'o': {ident_check_kw(t, "r", 1, GURU_OR); break;};
-    case 'p': {ident_check_kw(t, "rint", 1, GURU_PRINT); break;};
+    case 'p': if (t->len > 5) {
+            switch (t->lexeme[5]) {
+            case 'o': ident_check_kw(t, "ut", 6, GURU_P_OUT); break;
+            case 'e': ident_check_kw(t, "rr", 6, GURU_P_ERR); break;
+        }
+        break;
+    };
     case 'r': {ident_check_kw(t, "eturn", 1, GURU_RETURN); break;};
     case 's': {ident_check_kw(t, "uper", 1, GURU_SUPER); break;};
     case 't': {ident_check_kw(t, "rue", 1, GURU_TRUE); break;};

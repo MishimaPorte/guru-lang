@@ -1,1 +1,4 @@
-"kek" ## "kek" ## "lol" #= "kekkeklol";
+var a = "kek";
+printout a;
+a = "lol";
+printout a;

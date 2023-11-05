@@ -21,6 +21,9 @@ struct compiler {
      * */
 };
 
+static const uint16_t ROTTEN        = 0x0001;
+static const uint16_t PANIC_MODE    = 0x0002;
+
 enum comp_precedence {
     __PREC_NONE,
     __PREC_ASSIGNMENT, // =
@@ -42,7 +45,9 @@ static void __comp_binary(struct compiler *comp);
 static void __comp_number(struct compiler *comp);
 static void __comp_grouping(struct compiler *comp);
 static void __comp_with_precedence(struct compiler *comp, enum comp_precedence prec);
+static void __comp_statement(struct compiler *comp);
 
+static void __insert_op(struct compiler *comp, void *blob, size_t blob_size, enum guru_type t, enum opcode op, enum opcode op16);
 struct pratt_rule {
     void (*prefix_fn)(struct compiler *comp);
     void (*infix_fn)(struct compiler *comp);
@@ -60,8 +65,8 @@ static void comp_err_report(struct compiler *comp, struct token *t, const char *
 #define comp_token(comp, tt) __comp_##tt(comp)
 
 // functions for each token type
-
-
 static struct pratt_rule *__get_pratt_rule(enum tokent tt);
+
+#define __enter_panic_mode(comp) ((comp)->state |= PANIC_MODE)
 
 #endif

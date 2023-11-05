@@ -7,9 +7,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include "hashmap.h"
 #include "stddef.h"
 
-#define __INITIAL_BLOB_PIT 200
+#define __INITIAL_BLOB_PIT 1024
 #define __INITIAL_STORAGE_PIT 1024
 
 enum guru_type {
@@ -17,7 +18,7 @@ enum guru_type {
     VAL_VOID,
     VAL_BYTE, VAL_2BYTE, VAL_4BYTE, VAL_8BYTE,
     BLOB_STRING, BLOB_INST, BLOB_VARINT, BLOB_FUNCTION,
-    BLOB_BLOB, BLOB_UNUSED,
+    BLOB_BLOB, BLOB_UNUSED, VAL_LINK,
 
     __PIT_OBJECT_END
 };
@@ -44,24 +45,31 @@ struct __guru_object {
 void __gc_collect();
 void collect_all();
 
-struct __the_pit {
+static struct {
+    struct hashmap int_strings;
+    struct hashmap globals;
     struct {
         uint64_t __first_free_offset;
         uint64_t cap;
         void *mem;
     } __blobs; // blob allocations like strings and literal blobs
-
-    void *storage;
-};
-static struct __the_pit pit;
+    void *storage; // FIXME: unused???
+} pit;
 void init_pit();
 
+uint8_t get_global(const void *name, size_t nsize, struct __guru_object *val);
+void set_global(const void *name, size_t nsize, const struct __guru_object *val);
+
+struct __blob_header *get_int_str(const void *key, size_t ksize);
+void obfree(struct __guru_object *o);
 
 /* Some reduced malloc implementation for use by the memory allocation subsystem of the Guru
  * */
 struct __guru_object *__alloc_go_header(enum guru_type tt);
 struct __blob_header *__alloc_blob(size_t s);
 struct __blob_header *__realloc_blob(struct __blob_header *b, size_t s); // s - new size
+
+struct __blob_header *alloc_string(size_t s);
 
 struct __consts {
     uint16_t count;

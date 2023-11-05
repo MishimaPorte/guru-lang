@@ -3,7 +3,9 @@
 #include "bytecode.h"
 #include "value.h"
 #include <stdint.h>
+#include <stdio.h>
 
+void __fprint_val(FILE *f, struct __guru_object *val);
 void __print_val(struct __guru_object *val);
 
 #define vm_st_push(v) ((v)->stack.head++)

@@ -1,5 +1,7 @@
 #include "value.h"
 #include "guru.h"
+#include "hashmap.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,9 +24,7 @@ uint16_t __add_const(struct __consts *c, void *val, size_t s, enum guru_type tt)
     return c->count++;
 }
 
-// GARBAGE COLLECTION-RELATED STUFF
 struct __blob_header *__alloc_blob(uint64_t s) {
-    // TODO: implement occasional garbage collection
 __start:
     if (__ffb->len >= s+sizeof(struct __blob_header) && __ffb->__rc == 0) {
         struct __blob_header *h = __ffb;
@@ -52,6 +52,7 @@ __start:
         }
         if (pit.__blobs.cap - ((void*)h - __mem(blobs)) < (sizeof(struct __blob_header) + s)) {
             __gc_collect();
+            printf("lol\n");
             goto __start;
         } else {
             h = __next_blob(h);
@@ -87,14 +88,54 @@ void init_pit() {
     __ffb->__rc = 0;
     __ffb->len = __INITIAL_BLOB_PIT - sizeof(struct __blob_header);
 
+    init_hashmap(&pit.int_strings);
+    init_hashmap(&pit.globals);
     pit.storage = malloc(__INITIAL_STORAGE_PIT);
 };
 
+uint8_t get_global(const void *name, size_t nsize, struct __guru_object *val) {
+    struct __blob_header *blob = get_val(&pit.globals, name, nsize);
+    if (blob == NULL) return 0;
+    if (val == NULL) return 1;
+    memcpy((void*)val, blob->__cont, blob->len);
+
+    return 1;
+};
+void set_global(const void *name, size_t nsize, const struct __guru_object *val) {
+    struct __blob_header *blob = __alloc_blob(sizeof(struct __guru_object));
+    memcpy(blob->__cont, val, sizeof(struct __guru_object));
+
+    set_val(&pit.globals, name, nsize, blob);
+};
+
+struct __blob_header *get_int_str(const void *key, size_t ksize) {
+    struct __blob_header *blob = get_val(&pit.int_strings, key, ksize);
+    if (blob == NULL) {
+        blob = __alloc_blob(ksize);
+        blob->len = ksize;
+        memcpy(blob->__cont, (void *) key, ksize);
+        set_val(&pit.int_strings, key, ksize, blob);
+    } else {
+        blob->__rc++;
+    }
+
+    return blob;
+};
+
+void obfree(struct __guru_object *o) {
+    switch (o->tag) {
+      case BLOB_STRING: case BLOB_BLOB: case BLOB_INST:
+      case BLOB_VARINT: case BLOB_FUNCTION:
+          o->as.blob->__rc--;
+      default:
+          break;
+    }
+};
 void __gc_collect() {
     uint64_t i = 0;
     struct __blob_header *prev = NULL;
     for (struct __blob_header *h = (struct __blob_header*) pit.__blobs.mem; i != pit.__blobs.cap;) {
-        printf("length: %lu, rc: %lu, i: %lu, content: %.*s, ptr: %x\n", h->len, h->__rc, i, h->len, h->__cont, h);
+        // printf("length: %lu, rc: %lu, i: %lu, content: %.*s, ptr: %x\n", h->len, h->__rc, i, h->len, h->__cont, h);
         if (h->__rc == 0) {
             if (prev != NULL) {
                 prev->len += h->len;

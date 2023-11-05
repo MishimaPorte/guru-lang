@@ -1,13 +1,29 @@
 #include "compiler.h"
 #include "bytecode.h"
+#include "hashmap.h"
 #include "scanner.h"
 #include "value.h"
 #include "vm.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+static void __insert_op(struct compiler *comp, void *blob, size_t blob_size, enum guru_type t, enum opcode op, enum opcode op16) {
+    uint16_t i = add_const(comp->compiled_chunk, blob, blob_size, t);
+    if (i<UINT8_MAX) {
+        chput(comp->compiled_chunk, op);
+        chput(comp->compiled_chunk, (uint8_t) i);
+        return;
+    }
+    if (i == UINT16_MAX) {
+        comp_err_report(comp, &comp->then, "too many constants for a single chunk");
+        return;
+    }
+    chput(comp->compiled_chunk, op16);
+    chputn(comp->compiled_chunk, &i, sizeof(i));
+}
 static void comp_err_report(struct compiler *comp, struct token *t, const char *msg) {
     if (had_panic(comp)) return;
     fprintf(stderr, "ERROR: line: %d, pos: %d ", t->line, t->pos);
@@ -32,9 +48,7 @@ static void advance(struct compiler *comp) {
     }
 }
 
-static void fin_chunk(struct chunk *c) {
-    chput(c, OP_RETURN_EXPRESSION);
-}
+static void fin_chunk(struct chunk *c) { }
 
 enum exec_code compile(const char *source, struct chunk *c) {
 
@@ -46,47 +60,83 @@ enum exec_code compile(const char *source, struct chunk *c) {
 
 
     advance(&comp);
-    __comp_expression(&comp);
+    while (comp.now.type != GURU_EOF) {
+        __comp_statement(&comp);
+        if (comp.state & PANIC_MODE) {
+            comp.state &= (~PANIC_MODE);
+            comp.state |= ROTTEN;
+            while (comp.now.type != GURU_EOF) {
+                if (comp.then.type == GURU_SEMICOLON) goto synched;
+                switch (comp.now.type) {
+                    case GURU_VAR: case GURU_P_OUT:
+                    case GURU_P_ERR: case GURU_RETURN:
+                        goto synched;
+                    default:;
+                };
+synched:
+                advance(&comp);
+                break;
+            }
+        }
+    }
     advance(&comp);
     fin_chunk(c);
     return had_err(&comp) ? RESULT_OK : RESULT_COMPERR;
 }
 
-// static void __comp_integer(struct compiler *comp) {
-//     uint16_t i = add_const(comp->compiled_chunk, __as_guru_bytes_8(strtoll(comp->then.lexeme, NULL, 10)));
-//     if (i>UINT8_MAX) {
-//         chput(comp->compiled_chunk, OP_CONST);
-//         chput(comp->compiled_chunk, (uint8_t) i);
-//         return;
-//     }
-//     if (i == UINT16_MAX) {
-//         comp_err_report(comp, &comp->then, "too many constants for a single chunk");
-//         return;
-//     }
-//     chput(comp->compiled_chunk, OP_CONST_16);
-//     chputn(comp->compiled_chunk, &i, sizeof(i));
-// }
+static void __comp_statement(struct compiler *comp) {
+    if (comp->now.type == GURU_VAR) {
+        advance(comp);
+        if (comp->now.type != GURU_IDENTIFIER) {
+            comp_err_report(comp, &comp->now, "expected identifier");
+            return;
+        };
+        advance(comp);
+
+        struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
+        if (comp->now.type == GURU_EQUAL) {
+            advance(comp);
+            // advance(comp);
+            __comp_expression(comp);
+        } else {
+            chput(comp->compiled_chunk, OP_LOAD_NOTHING);
+        }
+        __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_16);
+    } else if (comp->now.type == GURU_P_OUT) {
+        advance(comp);
+        __comp_expression(comp);
+        chput(comp->compiled_chunk, OP_PRINT_STDOUT);
+    } else if (comp->now.type == GURU_P_ERR) {
+        advance(comp);
+        __comp_expression(comp);
+        chput(comp->compiled_chunk, OP_PRINT_STDERR);
+    } else {
+        __comp_expression(comp);
+        chput(comp->compiled_chunk, OP_OP);
+    }
+    if (comp->now.type == GURU_SEMICOLON) {
+        advance(comp);
+    } else {
+        comp_err_report(comp, &comp->now, "unterminated statement!");
+    }
+}
+
 static void __comp_number(struct compiler *comp) {
     double num = strtod(comp->then.lexeme, NULL);
-    uint16_t i = add_const(comp->compiled_chunk, &num, sizeof(num), VAL_NUMBER);
-    if (i>UINT8_MAX) {
-        chput(comp->compiled_chunk, OP_CONST);
-        chput(comp->compiled_chunk, (uint8_t) i);
-        return;
-    }
-    if (i == UINT16_MAX) {
-        comp_err_report(comp, &comp->then, "too many constants for a single chunk");
-        return;
-    }
-    chput(comp->compiled_chunk, OP_CONST_16);
-    chputn(comp->compiled_chunk, &i, sizeof(i));
+    __insert_op(comp, &num, sizeof(num), VAL_NUMBER, OP_CONST, OP_CONST_16);
 }
+
+static void __comp_string(struct compiler *comp) {
+    struct __blob_header *blob = get_int_str(comp->then.lexeme + 1, comp->then.len - 2);
+    __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_CONST, OP_CONST_16);
+}
+
 static void __comp_grouping(struct compiler *comp) {
 
     __comp_expression(comp);
-    
     panic_if_not_this(comp, GURU_RIGHT_PAREN, "unmatched left parentheses");
 };
+
 static void __comp_unary(struct compiler *comp) {
     enum tokent t = comp->then.type;
     __comp_with_precedence(comp, __PREC_UNARY);
@@ -97,26 +147,23 @@ static void __comp_unary(struct compiler *comp) {
         default: return;
     }
 }
+
 static void __comp_expression(struct compiler *comp) {
     __comp_with_precedence(comp, __PREC_ASSIGNMENT);
 };
-static void __comp_string(struct compiler *comp) {
-    struct __blob_header *blob = __alloc_blob(comp->then.len - 2);
-    blob->len = comp->then.len - 2;
-    memcpy(blob->__cont, (void *) comp->then.lexeme + 1, comp->then.len - 2);
-    uint16_t i = add_const(comp->compiled_chunk, &blob, sizeof(blob), BLOB_STRING);
-    if (i<UINT8_MAX) {
-        chput(comp->compiled_chunk, OP_CONST);
-        chput(comp->compiled_chunk, (uint8_t) i);
-        return;
+
+static void __comp_identifier(struct compiler *comp) {
+    struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
+    if (comp->now.type == GURU_EQUAL) {
+        advance(comp);
+        __comp_expression(comp);
+        __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_ASSIGN_GLOBAL, OP_ASSIGN_GLOBAL_16);
+        __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16);
+    } else {
+        __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16);
     }
-    if (i == UINT16_MAX) {
-        comp_err_report(comp, &comp->then, "too many constants for a single chunk");
-        return;
-    }
-    chput(comp->compiled_chunk, OP_CONST_16);
-    chputn(comp->compiled_chunk, &i, sizeof(i));
-}
+};
+
 static void __comp_liter(struct compiler *comp) {
     switch (comp->then.type) {
     case GURU_TRUE: return chput(comp->compiled_chunk, OP_LOAD_TRUTH);
@@ -126,6 +173,7 @@ static void __comp_liter(struct compiler *comp) {
     default: comp_err_report(comp, &comp->then, "invalid literal"); // unreachable
     }
 };
+
 static void __comp_binary(struct compiler *comp) {
     enum tokent tt = comp->then.type;
 
@@ -199,7 +247,7 @@ static struct pratt_rule pratt_table[] = {
 
     [GURU_EQUAL] = {NULL, NULL, __PREC_NONE},
 
-    [GURU_IDENTIFIER] = {NULL, NULL, __PREC_NONE},
+    [GURU_IDENTIFIER] = {&__comp_identifier, NULL, __PREC_NONE},
     [GURU_NUMBER] = {&__comp_number, NULL, __PREC_NONE},
     [GURU_STRING] = {&__comp_string, NULL, __PREC_NONE},
 
@@ -218,7 +266,8 @@ static struct pratt_rule pratt_table[] = {
     [GURU_IF] = {NULL, NULL, __PREC_NONE},
     [GURU_ELSE] = {NULL, NULL, __PREC_NONE},
 
-    [GURU_PRINT] = {NULL, NULL, __PREC_NONE},
+    [GURU_P_ERR] = {NULL, NULL, __PREC_NONE},
+    [GURU_P_OUT] = {NULL, NULL, __PREC_NONE},
 
     [GURU_RETURN] = {NULL, NULL, __PREC_NONE},
 

@@ -18,7 +18,7 @@ void __runtime_error(struct guru_vm *vm, uint8_t *ip, const char *format, ...) {
     uint16_t line = 0;
 
     __find_lninfo_for_op(vm, code_n, line);
-    fprintf(stderr, "[line %d] runtime error\n", line);
+    fprintf(stderr, "[line %d] runtime error\n", line+1);
 
     va_list args;
     va_start(args, format);
@@ -53,17 +53,24 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
         else if (v->state & 0x0001) goto end_error;
         switch (*ip++) {
         case OP_EXIT: exit(0);
-        case OP_PR_STHEAD: {
+        case OP_PRINT_STDERR: {
            struct __guru_object *printed = vm_st_pop(v);
-           printf("printing: %f\n", printed->as.numeric);
+           __fprint_val(stderr, printed);
+           obfree(printed);
            break;
-          };
+        };
+        case OP_PRINT_STDOUT: {
+           struct __guru_object *printed = vm_st_pop(v);
+           __fprint_val(stdout, printed);
+           obfree(printed);
+           break;
+        };
         case OP_FLOAT_UN_PLUS: break;
         case OP_FLOAT_NEGATE: {
            if (__get_stack_val(v, 0).tag != VAL_NUMBER) __runtime_error(v, ip-1, "expecting number operand");
            vm_st_head(v)->as.numeric = -vm_st_head(v)->as.numeric;
            break;
-          }
+        }
         case OP_LOGNOT: {
            if (__get_stack_val(v, 0).tag != VAL_BOOL) __runtime_error(v, ip-1, "expecting boolean operand");
            if (vm_st_head(v)->as.bool) vm_st_head(v)->as.bool = 0;
@@ -75,125 +82,192 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
            if (__get_stack_val(v, 1).tag != BLOB_STRING) __runtime_error(v, ip-3, "expecting string operand");
            struct __guru_object *l = vm_st_pop(v);
            struct __guru_object *r = vm_st_pop(v);
-           *vm_st_push(v) = (l->as.blob->len == r->as.blob->len && !memcmp(&l->as.blob->__cont[0], &r->as.blob->__cont[0], l->as.blob->len) ? __GURU_TRUE : __GURU_FALSE);
+           struct __guru_object ret = (l->as.blob == r->as.blob || l->as.blob->len == r->as.blob->len && !memcmp(&l->as.blob->__cont[0], &r->as.blob->__cont[0], l->as.blob->len) ? __GURU_TRUE : __GURU_FALSE);
+           l->as.blob->__rc--;
+           r->as.blob->__rc--;
+           *vm_st_push(v) = ret;
            break;
-          };
+        };
         case OP_STR_CONC: {
            if (__get_stack_val(v, 0).tag != BLOB_STRING) __runtime_error(v, ip-2, "expecting string operand");
            if (__get_stack_val(v, 1).tag != BLOB_STRING) __runtime_error(v, ip-3, "expecting string operand");
            struct __guru_object *val = vm_st_pop(v);
+           struct __guru_object *head = vm_st_pop(v);
+
+           struct __blob_header *blob = __alloc_blob(val->as.blob->len + head->as.blob->len);
+           blob->len = val->as.blob->len + head->as.blob->len;
+           memcpy(blob->__cont, (void *) head->as.blob->__cont, head->as.blob->len);
+           memcpy(blob->__cont + head->as.blob->len, (void *) val->as.blob->__cont, val->as.blob->len);
+
+           head->as.blob->__rc--;
            val->as.blob->__rc--;
-           struct __guru_object *head = v->stack.head - 1;
-           uint64_t old_s = head->as.blob->len;
-           head->as.blob = __realloc_blob(head->as.blob, head->as.blob->len + val->as.blob->len);
-           memcpy(head->as.blob->__cont + old_s, val->as.blob->__cont, val->as.blob->len);
+
+           struct __guru_object *h = vm_st_push(v);
+           h->tag = BLOB_STRING;
+           h->as.blob = blob;
            break;
-          }
+        }
         case OP_LOAD_VOID:
            *vm_st_push(v) = __GURU_VOID;
-           break;
+            break;
         case OP_LOAD_NOTHING:
            *vm_st_push(v) = __GURU_NOTHING;
-           break;
+            break;
         case OP_LOAD_TRUTH: {
            uint64_t i = 1;
            *vm_st_push(v) = __GURU_TRUE;
            break;
-                            }
+        }
         case OP_LOAD_LIES:{
            uint64_t i = 0;
            *vm_st_push(v) = __GURU_FALSE;
            break;
-                          }
+        }
         case OP_NEQ: {
            struct __guru_object *l = vm_st_pop(v);
            struct __guru_object *r = vm_st_pop(v);
            *vm_st_push(v) = __val_neq(l, r);
            break;
-          };
+        };
         case OP_EQ: {
            struct __guru_object *l = vm_st_pop(v);
            struct __guru_object *r = vm_st_pop(v);
            *vm_st_push(v) = __val_eq(l, r);
            break;
-          };
+        };
         case OP_GTE: {
            comp_binary_op(v, ip, >=, VAL_NUMBER, numeric);
            break;
-          };
+        };
         case OP_LTE: {
            comp_binary_op(v, ip, <=, VAL_NUMBER, numeric);
            break;
-          };
+        };
         case OP_LT: {
            comp_binary_op(v, ip, <, VAL_NUMBER, numeric);
            break;
-          };
+        };
         case OP_GT: {
            comp_binary_op(v, ip, >, VAL_NUMBER, numeric);
            break;
-          };
+        };
         case OP_FLOAT_MULT_2: {
            binary_op(v, ip, *, VAL_NUMBER, numeric);
            break;
-          };
+        };
         case OP_FLOAT_SUB: {
            binary_op(v, ip, -, VAL_NUMBER, numeric);
            break;
-          };
+        };
         case OP_FLOAT_DIVIDE: {
            binary_op(v, ip, /, VAL_NUMBER, numeric);
            break;
-          };
+        };
         case OP_FLOAT_SUM_2: {
-         // __runtime_error(v, "summation does not work any more");
            binary_op(v, ip, +, VAL_NUMBER, numeric);
            break;
-          };
+        };
+        case OP_ASSIGN_GLOBAL_16: {
+            uint16_t i = *((uint16_t*) ip++);
+            struct __guru_object o = c->consts.vals[i];
+            if (!get_global(o.as.blob->__cont, o.as.blob->len, NULL)) {
+                __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
+                return RESULT_RERR;
+            };
+            set_global(o.as.blob->__cont, o.as.blob->len, vm_st_head(v));
+            vm_st_pop(v);
+            ip++;
+            break;
+        };
+        case OP_ASSIGN_GLOBAL: {
+            struct __guru_object o = c->consts.vals[*ip++];
+            if (!get_global(o.as.blob->__cont, o.as.blob->len, NULL)) {
+                __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
+                return RESULT_RERR;
+            };
+            struct __guru_object *a = vm_st_pop(v);
+            struct __guru_object aw;
+            set_global(o.as.blob->__cont, o.as.blob->len, a);
+            if (!get_global(o.as.blob->__cont, o.as.blob->len, &aw)) {
+                __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
+                return RESULT_RERR;
+            };
+            break;
+        };
+        case OP_LOAD_GLOBAL: {
+            struct __guru_object o = c->consts.vals[*ip++];
+            if (!get_global(o.as.blob->__cont, o.as.blob->len, vm_st_push(v))) {
+                __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
+                return RESULT_RERR;
+            };
+            break;
+        };
+        case OP_LOAD_GLOBAL_16: {
+            uint16_t i = *((uint16_t*) ip++);
+            struct __guru_object o = c->consts.vals[i];
+            if (!get_global(o.as.blob->__cont, o.as.blob->len, vm_st_push(v))) {
+                __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
+                return RESULT_RERR;
+            };
+            ip++;
+            break;
+        };
+        case OP_DEFINE_GLOBAL: {
+            struct __guru_object o = c->consts.vals[*ip++];
+            set_global(o.as.blob->__cont, o.as.blob->len, vm_st_head(v));
+            vm_st_pop(v);
+            break;
+        };
+        case OP_DEFINE_GLOBAL_16: {
+            uint16_t i = *((uint16_t*) ip++);
+            struct __guru_object o = c->consts.vals[i];
+            set_global(o.as.blob->__cont, o.as.blob->len, vm_st_head(v));
+            vm_st_pop(v);
+            ip++;
+        };
+        case OP_OP: {
+            obfree(vm_st_pop(v));
+            break;
+        };
         case OP_CONST: {
            *vm_st_push(v) = c->consts.vals[*ip++];
            break;
-          };
+        };
         case OP_CONST_16: {
            uint16_t i = *((uint16_t*) ip++);
            *vm_st_push(v) = c->consts.vals[i];
            ip++;
            break;
-          };
-        case OP_RETURN_EXPRESSION:
-              __print_val(vm_st_pop(v));
-             break;
+        };
+        case OP_RETURN_EXPRESSION: {
+           struct __guru_object *o = vm_st_pop(v);
+           break;
+        }
         default: printf("unknown opcode! %d\n", *ip);
         }
     }
-    // for (struct __guru_object *o = v->stack.stack;; o++) {
-    //     printf("stack: [%d], ", o->tag);
-    //     __print_val(o);
-    //     if (o == v->stack.head) break;
-    // };
-    printf("END\n");
     __gc_collect();
     return RESULT_OK;
 end_error:
     return RESULT_RERR;
 };
 
-void __print_val(struct __guru_object *val) {
+void __fprint_val(FILE *f, struct __guru_object *val) {
     switch (val->tag) {
         case VAL_BOOL: 
-             printf("returning: %s\n", val->as.bool ? "true" : "false");
+             fprintf(f, "%s\n", val->as.bool ? "true" : "false");
              break;
         case VAL_NUMBER: 
-             printf("returning: %f\n", val->as.numeric);
+             fprintf(f, "%f\n", val->as.numeric);
              break;
-        case VAL_NOTHING: 
-             printf("returning: nothing\n");
+        case VAL_NOTHING:
+             fprintf(f, "nothing\n");
              break;
         case VAL_VOID: 
-             printf("returning: void\n");
+             fprintf(f, "void\n");
              break;
         case BLOB_STRING:
-             printf("returning: %.*s\n", val->as.blob->len, val->as.blob->__cont);
+             fprintf(f, "%.*s\n", val->as.blob->len, val->as.blob->__cont);
              break;
         default: return;
     }
