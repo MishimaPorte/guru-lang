@@ -1,4 +1,4 @@
-var a = "kek";
-printout a;
-a = "lol";
+var a = 1;
+var b = 2;
+a = a + (b = 3);
 printout a;

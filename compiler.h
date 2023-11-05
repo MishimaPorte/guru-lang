@@ -16,13 +16,15 @@ struct compiler {
 
     uint16_t state;
     /*
-     *  0x0001 set if compiler had any kinds of errors
-     *  0x0002 set if compiler is currently in panic mode
+     *  0x0001 is set if compiler had any kinds of errors
+     *  0x0002 is set if compiler is currently in panic mode
+     *  0x0004 is set if the compiler is now parsing something inside which it can do assignment
      * */
 };
 
 static const uint16_t ROTTEN        = 0x0001;
 static const uint16_t PANIC_MODE    = 0x0002;
+static const uint16_t ASSIGN_PERMIT = 0x0004;
 
 enum comp_precedence {
     __PREC_NONE,

@@ -155,10 +155,13 @@ static void __comp_expression(struct compiler *comp) {
 static void __comp_identifier(struct compiler *comp) {
     struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
     if (comp->now.type == GURU_EQUAL) {
+        if (!(comp->state & ASSIGN_PERMIT)) {
+            comp_err_report(comp, &comp->then, "assignment not allowed here");
+            return;
+        }
         advance(comp);
         __comp_expression(comp);
         __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_ASSIGN_GLOBAL, OP_ASSIGN_GLOBAL_16);
-        // __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16);
     } else {
         __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16);
     }
@@ -213,7 +216,11 @@ static void __comp_with_precedence(struct compiler *comp, enum comp_precedence p
         return;
     }
     
+    if (prec <= __PREC_ASSIGNMENT)
+        comp->state |= ASSIGN_PERMIT;
+    else comp->state &= (~ASSIGN_PERMIT);
     pref_fn(comp);
+    comp->state &= (~ASSIGN_PERMIT);
 
     while (prec <= __get_pratt_rule(comp->now.type)->prec) {
         advance(comp);
