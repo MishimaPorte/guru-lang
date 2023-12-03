@@ -1,6 +1,7 @@
 #ifndef GURU_VM
 #define GURU_VM
 #include "bytecode.h"
+#include "reg_stack.h"
 #include "value.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -8,6 +9,7 @@
 void __fprint_val(FILE *f, struct __guru_object *val);
 void __print_val(struct __guru_object *val);
 
+#define LOCAL_VARIABLE_STACK_SIZE 1024
 #define vm_st_push(v) ((v)->stack.head++)
 #define comp_binary_op(v, ip, op, ttag, lift)  { \
     if (__get_stack_val(v, 0).tag != ttag) __runtime_error(v, ip-2, "expecting number operands"); \
@@ -28,6 +30,7 @@ struct guru_vm {
     struct chunk *code;
     uint8_t *ip;
     uint16_t state;
+    uint8_t current_frame_offset;
     /* some bit flags:
      * 0x0001 stands for runtime error mode to signal graceful shutdown or something
      * */
@@ -36,6 +39,16 @@ struct guru_vm {
         struct __guru_object *stack;
         struct __guru_object *head;
     } stack;
+
+    /*INFO: local variable stack, 0-16 (??) (in each call frame) are privileged:
+     * 0: ip for function returning,
+     * 1: frame offset for function returning
+     * 2: this in method calls
+     * 3: exception (?)
+     * 4-15: unassigned (yet)
+     * each function call grabs another frame
+     * */
+    struct __guru_object r[LOCAL_VARIABLE_STACK_SIZE];
 };
 
 enum exec_code {
@@ -58,6 +71,7 @@ enum exec_code run(struct guru_vm *v, struct chunk *c);
 #define __get_stack_val(v, i) ((v)->stack.head[-1 - i])
 #define __val_eq(l, r) ((((l)->tag == (r)->tag)) && memcmp(&(l)->as, &(r)->as, sizeof((l)->as)) == 0 ? __GURU_TRUE : __GURU_FALSE)
 #define __val_neq(l, r) (((l)->tag != (r)->tag) || memcmp(&(l)->as, &(r)->as, sizeof((l)->as)) != 0 ? __GURU_TRUE : __GURU_FALSE)
+#define reg(v, n) ((v)->r[(v)->current_frame_offset + (n)])
 
 void repl(struct guru_vm *v);
 void execf(struct guru_vm *v, const char *fname);

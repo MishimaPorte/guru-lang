@@ -18,8 +18,22 @@ enum opcode {
 
     OP_STR_CONC, OP_STRING_EQ,
 
-    OP_OP, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_16, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16,
-    OP_ASSIGN_GLOBAL, OP_ASSIGN_GLOBAL_16
+    OP_OP, OP_POP_MANY, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_16, OP_LOAD_GLOBAL, OP_LOAD_GLOBAL_16,
+    OP_ASSIGN_GLOBAL, OP_ASSIGN_GLOBAL_16,
+
+    OP_CLEAN_AFTER_BLOCK,
+
+    //JUMPS
+    OP_JUMP_IF_FALSE, OP_JUMP_IF_TRUE, OP_JUMP, OP_JUMP_BACK,
+    OP_JUMP_IF_FALSE_ONSTACK, OP_JUMP_IF_TRUE_ONSTACK,
+    //register-based opcodes
+    OP_LOAD_8, OP_PUT_8, OP_PUT_8_WITH_POP,
+    OP_PUT_8_NOTHING,
+    OP_PUT_8_VOID,
+
+    OP_PRE_CALL, OP_CALL, OP_RETURN, OP_DECLARE_ANON_FUNCTION,
+
+    OP_OFFLOAD_REGISTER, OP_LOAD_REGISTER,
 };
 struct lninfo {
     uint32_t opstart;
@@ -41,6 +55,7 @@ struct chunk {
 
 void chfree(struct chunk *c);
 void chput(struct chunk *c, uint8_t opcode);
+void chunputif(struct chunk *c, enum opcode o, enum opcode o2);
 void chputn(struct chunk *c, void *val, size_t size);
 void chputl(struct chunk *c);
 struct chunk *challoc(void); 

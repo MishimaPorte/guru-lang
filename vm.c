@@ -1,6 +1,7 @@
 #include "vm.h"
 #include "bytecode.h"
 #include "compiler.h"
+#include "debug.h"
 #include "guru.h"
 #include "value.h"
 #include <stdarg.h>
@@ -34,6 +35,7 @@ struct guru_vm *vm_init() {
     v->stack.stack = calloc(1024, sizeof(struct __guru_object*));
     v->stack.head = v->stack.stack;
     v->state = 0;
+    v->current_frame_offset = 0;
 
     init_pit();
 
@@ -48,13 +50,14 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
 
     register uint8_t *ip = c->code;
 
+    // disassemble_chunk(c);
+
     for (;;) {
         if (ip > c->code + c->opcount - 1) break;
         else if (v->state & 0x0001) goto end_error;
         switch (*ip++) {
         case OP_EXIT: exit(0);
-        case OP_PRINT_STDERR: {
-           struct __guru_object *printed = vm_st_pop(v);
+        case OP_PRINT_STDERR: { struct __guru_object *printed = vm_st_pop(v);
            __fprint_val(stderr, printed);
            obfree(printed);
            break;
@@ -187,12 +190,114 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
             set_global(o.as.blob->__cont, o.as.blob->len, vm_st_head(v));
             break;
         };
+        case OP_CLEAN_AFTER_BLOCK: {
+            uint16_t i = *((uint16_t*) ip++);
+            struct __guru_object obj = *vm_st_pop(v);
+            // for (uint16_t x = 0; x < i; x++) obfree(vm_st_pop(v));
+            *vm_st_push(v) = obj;
+            ip++;
+            break;
+        };
         case OP_LOAD_GLOBAL: {
             struct __guru_object o = c->consts.vals[*ip++];
             if (!get_global(o.as.blob->__cont, o.as.blob->len, vm_st_push(v))) {
                 __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
                 return RESULT_RERR;
             };
+            break;
+        };
+        case OP_PUT_8_WITH_POP: {
+            reg(v, *ip++) = *vm_st_pop(v);
+            break;
+        };
+        case OP_PUT_8: {
+            reg(v, *ip++) = *vm_st_head(v);
+            break;
+        };
+        case OP_JUMP_BACK: {
+            uint32_t i = *((uint32_t*) ip++);
+            ip+=3;
+            ip -= i;
+            break;
+        };
+        case OP_JUMP: {
+            uint32_t i = *((uint32_t*) ip++);
+            ip+=3;
+            ip += i;
+            break;
+        };
+        case OP_JUMP_IF_TRUE_ONSTACK: {
+            uint32_t i = *((uint32_t*) ip++);
+            ip+=3;
+            if (test(vm_st_head(v)))
+                ip += i;
+            break;
+        };
+        case OP_JUMP_IF_TRUE: {
+            uint32_t i = *((uint32_t*) ip++);
+            ip+=3;
+            if (test(vm_st_pop(v)))
+                ip += i;
+            break;
+        };
+        case OP_JUMP_IF_FALSE_ONSTACK: {
+            uint32_t i = *((uint32_t*) ip++);
+            ip+=3;
+            if (!test(vm_st_head(v)))
+                ip += i;
+            break;
+        };
+        case OP_JUMP_IF_FALSE: {
+            uint32_t i = *((uint32_t*) ip++);
+            ip+=3;
+            if (!test(vm_st_pop(v)))
+                ip += i;
+            break;
+        };
+        case OP_DECLARE_ANON_FUNCTION: {
+            uint32_t code = *((uint32_t*) ip);
+            ip += 4;
+            struct __blob_header *blob = alloc_guru_callable(code, *ip++);
+            *vm_st_push(v) = (struct __guru_object){.as.blob = blob, .tag = BLOB_CALLABLE};
+            break;
+        };
+        case OP_RETURN: {
+            ip = c->code + reg(v, 0).as.bytes_4;
+            v->current_frame_offset = reg(v, 1).as.byte;
+            break;
+        };
+        case OP_CALL: {
+            uint8_t cfo_old = v->current_frame_offset;
+            v->current_frame_offset = cfo_old + *ip++;
+            uint8_t provided_arity = *ip++;
+            reg(v, 0) = (struct __guru_object){
+                .as.bytes_4 = (uint32_t) (ip - c->code),
+                .tag = VAL_4BYTE,
+            };
+            reg(v, 1) = (struct __guru_object){
+                .tag = VAL_BYTE,
+                .as.byte = cfo_old,
+            };
+            for (uint8_t i = provided_arity; i > 0; i--)
+                reg(v, i + PRIVILEGED_STACK_SLOTS - 1) = *vm_st_pop(v);
+            struct guru_callable *func = (struct guru_callable*) vm_st_pop(v)->as.blob->__cont;
+            if (provided_arity < func->arity) {
+                __runtime_error(v, ip - 2, "not enough function arguments\n");
+                return RESULT_RERR;
+            }
+            ip = c->code + func->func_begin;
+            break;
+        };
+        case OP_PUT_8_VOID: {
+            reg(v, *ip++) = __GURU_VOID;
+            break;
+        };
+        case OP_PUT_8_NOTHING: {
+            reg(v, *ip++) = __GURU_NOTHING;
+            break;
+        };
+        case OP_LOAD_8: {
+            *vm_st_push(v) = reg(v, *ip++);
             break;
         };
         case OP_LOAD_GLOBAL_16: {
@@ -207,16 +312,18 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
         };
         case OP_DEFINE_GLOBAL: {
             struct __guru_object o = c->consts.vals[*ip++];
-            set_global(o.as.blob->__cont, o.as.blob->len, vm_st_head(v));
-            vm_st_pop(v);
+            set_global(o.as.blob->__cont, o.as.blob->len, vm_st_pop(v));
             break;
         };
         case OP_DEFINE_GLOBAL_16: {
             uint16_t i = *((uint16_t*) ip++);
             struct __guru_object o = c->consts.vals[i];
-            set_global(o.as.blob->__cont, o.as.blob->len, vm_st_head(v));
-            vm_st_pop(v);
+            set_global(o.as.blob->__cont, o.as.blob->len, vm_st_pop(v));
             ip++;
+        };
+        case OP_POP_MANY: {
+          //TODO: implement
+            break;
         };
         case OP_OP: {
             obfree(vm_st_pop(v));
@@ -256,6 +363,11 @@ void __fprint_val(FILE *f, struct __guru_object *val) {
         case VAL_NOTHING:
              fprintf(f, "nothing\n");
              break;
+        case BLOB_CALLABLE: {
+             struct guru_callable *func = (struct guru_callable*) val->as.blob->__cont;
+             fprintf(f, "[function] (%d:%d)\n", func->func_begin, func->arity);
+             break;
+        }
         case VAL_VOID: 
              fprintf(f, "void\n");
              break;

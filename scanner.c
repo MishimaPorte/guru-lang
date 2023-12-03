@@ -115,7 +115,7 @@ static void ident_scan_dfa(struct scanner *s, struct token *t) {
         break;
     case 'e': {ident_check_kw(t, "lse", 1, GURU_ELSE); break;};
     case 'i': {ident_check_kw(t, "f", 1, GURU_IF); break;};
-    case 'n': {ident_check_kw(t, "il", 1, GURU_NOTHING); break;};
+    case 'n': {ident_check_kw(t, "othing", 1, GURU_NOTHING); break;};
     case 'o': {ident_check_kw(t, "r", 1, GURU_OR); break;};
     case 'p': if (t->len > 5) {
             switch (t->lexeme[5]) {

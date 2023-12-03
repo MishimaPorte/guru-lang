@@ -1,4 +1,8 @@
-var a = 1;
-var b = 2;
-a = a + (b = 3);
-printout a;
+printout (fun (abk, a, b) (fun (abk2) {
+            printout abk2;
+            abk2 + 1;
+        })(a) + (fun (abk2) {
+            printout abk2;
+            abk2 + 1;
+        })(b)
+    )(3, 1, 10);

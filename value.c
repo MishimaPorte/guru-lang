@@ -7,6 +7,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+uint8_t test(const struct __guru_object *val) {
+    switch (val->tag) {
+        case VAL_VOID: case VAL_NOTHING:
+            return 0;
+        case VAL_BOOL:
+            return val->as.bool;
+        case VAL_NUMBER:
+            return val->as.numeric > 0.0;
+        case BLOB_STRING: case BLOB_BLOB: {
+            return val->as.blob->len == 0 ? 0 : 1;
+        };
+        default:
+            return 0;
+    }
+};
+
 void __free_const_array(struct __consts *c) {
     free(c->vals);
     c->count = 0;
@@ -52,7 +68,6 @@ __start:
         }
         if (pit.__blobs.cap - ((void*)h - __mem(blobs)) < (sizeof(struct __blob_header) + s)) {
             __gc_collect();
-            printf("lol\n");
             goto __start;
         } else {
             h = __next_blob(h);
@@ -105,6 +120,9 @@ void set_global(const void *name, size_t nsize, const struct __guru_object *val)
     struct __blob_header *blob = __alloc_blob(sizeof(struct __guru_object));
     memcpy(blob->__cont, val, sizeof(struct __guru_object));
 
+    void *alr;
+    if ((alr = get_val(&pit.globals, name, nsize)) != NULL)
+        ((struct __blob_header *)alr)->__rc--;;
     set_val(&pit.globals, name, nsize, blob);
 };
 
@@ -122,10 +140,18 @@ struct __blob_header *get_int_str(const void *key, size_t ksize) {
     return blob;
 };
 
+struct __blob_header *alloc_guru_callable(uint32_t start, uint8_t arity) {
+    struct __blob_header *blob = __alloc_blob(sizeof(struct guru_callable));
+    ((struct guru_callable*)blob->__cont)->arity = arity;
+    ((struct guru_callable*)blob->__cont)->func_begin = start;
+
+    return blob;
+};
+
 void obfree(struct __guru_object *o) {
     switch (o->tag) {
       case BLOB_STRING: case BLOB_BLOB: case BLOB_INST:
-      case BLOB_VARINT: case BLOB_FUNCTION:
+      case BLOB_VARINT: case BLOB_CALLABLE:
           o->as.blob->__rc--;
       default:
           break;
@@ -135,7 +161,6 @@ void __gc_collect() {
     uint64_t i = 0;
     struct __blob_header *prev = NULL;
     for (struct __blob_header *h = (struct __blob_header*) pit.__blobs.mem; i != pit.__blobs.cap;) {
-        // printf("length: %lu, rc: %lu, i: %lu, content: %.*s, ptr: %x\n", h->len, h->__rc, i, h->len, h->__cont, h);
         if (h->__rc == 0) {
             if (prev != NULL) {
                 prev->len += h->len;

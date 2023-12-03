@@ -24,6 +24,10 @@ void chfree(struct chunk *c) {
     c->consts.capacity = 0;
     c->consts.count = 0;
 }
+void chunputif(struct chunk *c, enum opcode o, enum opcode o2) {
+    if (c->code[c->opcount-1] == o) c->opcount--;
+    else chput(c, (uint8_t)o2);
+};
 
 void chputn(struct chunk *c, void *val, size_t size) {
     if (c->capacity <= c->opcount + size) {

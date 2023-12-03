@@ -17,8 +17,10 @@ enum guru_type {
     VAL_BOOL, VAL_NOTHING, VAL_NUMBER,
     VAL_VOID,
     VAL_BYTE, VAL_2BYTE, VAL_4BYTE, VAL_8BYTE,
-    BLOB_STRING, BLOB_INST, BLOB_VARINT, BLOB_FUNCTION,
+    BLOB_STRING, BLOB_INST, BLOB_VARINT,
     BLOB_BLOB, BLOB_UNUSED, VAL_LINK,
+
+    BLOB_CALLABLE,
 
     __PIT_OBJECT_END
 };
@@ -37,7 +39,7 @@ struct __guru_object {
         uint32_t bytes_4;
         uint64_t bytes_8;
         double numeric;
-        struct __blob_header *blob; // introducing CS language innovation: tagged heap blobs as 1-class values!
+        struct __blob_header *blob; // tagged heap blobs as 1-class values!
     } as;
 };
 
@@ -60,6 +62,8 @@ void init_pit();
 uint8_t get_global(const void *name, size_t nsize, struct __guru_object *val);
 void set_global(const void *name, size_t nsize, const struct __guru_object *val);
 
+uint8_t test(const struct __guru_object *val);
+
 struct __blob_header *get_int_str(const void *key, size_t ksize);
 void obfree(struct __guru_object *o);
 
@@ -71,11 +75,18 @@ struct __blob_header *__realloc_blob(struct __blob_header *b, size_t s); // s - 
 
 struct __blob_header *alloc_string(size_t s);
 
+struct guru_callable {
+    uint32_t func_begin;
+    uint8_t arity; // you dont actually need more than 255 arguments to a function
+};
+struct __blob_header *alloc_guru_callable(uint32_t start, uint8_t arity);
+
 struct __consts {
     uint16_t count;
     uint16_t capacity;
     struct __guru_object *vals;
 };
+
 void __free_const_array(struct __consts *c);
 uint16_t __add_const(struct __consts *c, void *val, size_t s, enum guru_type tt);
 
