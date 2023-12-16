@@ -2,6 +2,7 @@
 #include "bytecode.h"
 #include "compiler.h"
 #include "debug.h"
+#include "ffi.h"
 #include "guru.h"
 #include "value.h"
 #include <stdarg.h>
@@ -49,25 +50,14 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
     v->code = c;
 
     register uint8_t *ip = c->code;
-
-    // disassemble_chunk(c);
+    def_nats(v);
+    disassemble_chunk(c);
 
     for (;;) {
         if (ip > c->code + c->opcount - 1) break;
         else if (v->state & 0x0001) goto end_error;
         switch (*ip++) {
         case OP_EXIT: exit(0);
-        case OP_PRINT_STDERR: { struct __guru_object *printed = vm_st_pop(v);
-           __fprint_val(stderr, printed);
-           obfree(printed);
-           break;
-        };
-        case OP_PRINT_STDOUT: {
-           struct __guru_object *printed = vm_st_pop(v);
-           __fprint_val(stdout, printed);
-           obfree(printed);
-           break;
-        };
         case OP_FLOAT_UN_PLUS: break;
         case OP_FLOAT_NEGATE: {
            if (__get_stack_val(v, 0).tag != VAL_NUMBER) __runtime_error(v, ip-1, "expecting number operand");
@@ -97,10 +87,9 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
            struct __guru_object *val = vm_st_pop(v);
            struct __guru_object *head = vm_st_pop(v);
 
-           struct __blob_header *blob = __alloc_blob(val->as.blob->len + head->as.blob->len);
-           blob->len = val->as.blob->len + head->as.blob->len;
-           memcpy(blob->__cont, (void *) head->as.blob->__cont, head->as.blob->len);
-           memcpy(blob->__cont + head->as.blob->len, (void *) val->as.blob->__cont, val->as.blob->len);
+           struct __blob_header *blob = __alloc_blob(val->as.blob->len + head->as.blob->len - 1);
+           memcpy(blob->__cont, (void *) head->as.blob->__cont, head->as.blob->len - 1);
+           memcpy(blob->__cont + head->as.blob->len - 1, (void *) val->as.blob->__cont, val->as.blob->len);
 
            head->as.blob->__rc--;
            val->as.blob->__rc--;
@@ -198,20 +187,32 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
             ip++;
             break;
         };
-        case OP_LOAD_GLOBAL: {
-            struct __guru_object o = c->consts.vals[*ip++];
-            if (!get_global(o.as.blob->__cont, o.as.blob->len, vm_st_push(v))) {
-                __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
-                return RESULT_RERR;
-            };
-            break;
-        };
         case OP_PUT_8_WITH_POP: {
             reg(v, *ip++) = *vm_st_pop(v);
             break;
         };
+        case OP_LOAD_CLOSURE: {
+            *vm_st_push(v) = *(((struct guru_callable*) reg(v, R_FUNC).as.blob->__cont)->closures[*ip++]);
+            break;
+        };
+        case OP_PUT_CLOSURE: {
+            *(((struct guru_callable*) reg(v, R_FUNC).as.blob->__cont)->closures[*ip++]) = *vm_st_head(v);
+            break;
+        };
+        case OP_LOAD_LINK: {
+            *vm_st_push(v) = ((struct __value_link*)reg(v, *ip++).as.blob->__cont)->o;
+            break;
+        };
+        case OP_PUT_LINK: {
+            ((struct __value_link*)reg(v, *ip++).as.blob->__cont)->o = *vm_st_pop(v);
+            break;
+        };
         case OP_PUT_8: {
             reg(v, *ip++) = *vm_st_head(v);
+            break;
+        };
+        case OP_LOAD_8: {
+            *vm_st_push(v) = reg(v, *ip++);
             break;
         };
         case OP_JUMP_BACK: {
@@ -257,7 +258,27 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
         case OP_DECLARE_ANON_FUNCTION: {
             uint32_t code = *((uint32_t*) ip);
             ip += 4;
-            struct __blob_header *blob = alloc_guru_callable(code, *ip++);
+            uint8_t arity = *ip++;
+            uint32_t i = *((uint32_t*) ip);
+            ip = c->code + i;
+            ip++;
+            uint8_t co = *ip++;
+            struct __blob_header *blob = alloc_guru_callable(code, arity, co);
+            struct guru_callable *gc = (struct guru_callable*)blob->__cont;
+            for (uint8_t i = 0; i < co; i++) {
+                uint8_t place = *ip++;
+                if (v->r[place].tag != VAL_LINK) {
+                    struct __blob_header *bh = __alloc_blob(sizeof(struct __value_link));
+                    ((struct __value_link*)bh->__cont)->o = v->r[place];
+                    ((struct __value_link*)bh->__cont)->rc = 1;
+                    v->r[place].tag = VAL_LINK;
+                    v->r[place].as.blob = bh;
+                    gc->closures[i] = &((struct __value_link*)bh->__cont)->o;
+                } else {
+                    ((struct __value_link*)v->r[place].as.blob->__cont)->rc += 1;
+                    gc->closures[i] = &((struct __value_link*)v->r[place].as.blob->__cont)->o;
+                }
+            }
             *vm_st_push(v) = (struct __guru_object){.as.blob = blob, .tag = BLOB_CALLABLE};
             break;
         };
@@ -270,6 +291,18 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
             uint8_t cfo_old = v->current_frame_offset;
             v->current_frame_offset = cfo_old + *ip++;
             uint8_t provided_arity = *ip++;
+            for (uint8_t i = provided_arity; i > 0; i--)
+                reg(v, i + PRIVILEGED_STACK_SLOTS - 1) = *vm_st_pop(v);
+            if (vm_st_head(v)->tag == BLOB_NATIVE) {
+                struct native_func *o = (struct native_func*) vm_st_pop(v)->as.blob->__cont;
+                *vm_st_push(v) = o->func(&reg(v, PRIVILEGED_STACK_SLOTS));
+                v->current_frame_offset = cfo_old;
+                continue;
+            }
+            if (vm_st_head(v)->tag != BLOB_CALLABLE) {
+                __runtime_error(v, ip - 2, "attempting to call a non-function\n");
+                return RESULT_RERR;
+            }
             reg(v, 0) = (struct __guru_object){
                 .as.bytes_4 = (uint32_t) (ip - c->code),
                 .tag = VAL_4BYTE,
@@ -278,9 +311,8 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
                 .tag = VAL_BYTE,
                 .as.byte = cfo_old,
             };
-            for (uint8_t i = provided_arity; i > 0; i--)
-                reg(v, i + PRIVILEGED_STACK_SLOTS - 1) = *vm_st_pop(v);
-            struct guru_callable *func = (struct guru_callable*) vm_st_pop(v)->as.blob->__cont;
+            struct guru_callable *func = (struct guru_callable*) vm_st_head(v)->as.blob->__cont;
+            reg(v, R_FUNC) = *vm_st_pop(v);
             if (provided_arity < func->arity) {
                 __runtime_error(v, ip - 2, "not enough function arguments\n");
                 return RESULT_RERR;
@@ -296,8 +328,12 @@ enum exec_code run(struct guru_vm *v, struct chunk *c) {
             reg(v, *ip++) = __GURU_NOTHING;
             break;
         };
-        case OP_LOAD_8: {
-            *vm_st_push(v) = reg(v, *ip++);
+        case OP_LOAD_GLOBAL: {
+            struct __guru_object o = c->consts.vals[*ip++];
+            if (!get_global(o.as.blob->__cont, o.as.blob->len, vm_st_push(v))) {
+                __runtime_error(v, ip - 2, "undefined variable: %.*s\n", o.as.blob->len, o.as.blob->__cont);
+                return RESULT_RERR;
+            };
             break;
         };
         case OP_LOAD_GLOBAL_16: {
@@ -372,7 +408,7 @@ void __fprint_val(FILE *f, struct __guru_object *val) {
              fprintf(f, "void\n");
              break;
         case BLOB_STRING:
-             fprintf(f, "%.*s\n", val->as.blob->len, val->as.blob->__cont);
+             fprintf(f, "%s\n", val->as.blob->__cont);
              break;
         default: return;
     }

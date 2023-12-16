@@ -13,7 +13,9 @@
 #include <string.h>
 
 
-static void fin_chunk(struct chunk *c) { }
+static void fin_chunk(struct chunk *c) {
+    chput(c, OP_EXIT);
+}
 
 static void __synchronize(struct compiler *comp) {
     comp->state &= (~PANIC_MODE);
@@ -146,14 +148,6 @@ static void __comp_statement(struct compiler *comp) {
         jump_to(comp, OP_JUMP_BACK, loop);
         confirm_jump(comp, ex);
         return;
-    } else if (comp->now.type == GURU_P_OUT) {
-        advance(comp);
-        __comp_expression(comp);
-        chput(comp->compiled_chunk, OP_PRINT_STDOUT);
-    } else if (comp->now.type == GURU_P_ERR) {
-        advance(comp);
-        __comp_expression(comp);
-        chput(comp->compiled_chunk, OP_PRINT_STDERR);
     } else {
         __comp_expression(comp);
         chput(comp->compiled_chunk, OP_OP);
@@ -193,8 +187,9 @@ static void __comp_expression(struct compiler *comp) {
 };
 
 static void __comp_identifier(struct compiler *comp) {
-    uint8_t loc;
-    if ((loc = resolve_local(comp)) == 0) {
+    struct local *var;
+    enum local_resolved loc;
+    if ((loc = resolve_local(comp, &var)) == RESOLVED_NON_LOCAL) {
         struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
         if (comp->now.type == GURU_EQUAL) {
             if (!(comp->state & ASSIGN_PERMIT)) {
@@ -216,12 +211,27 @@ static void __comp_identifier(struct compiler *comp) {
         }
         advance(comp);
         __comp_expression(comp);
-        chput(comp->compiled_chunk, OP_PUT_8);
-        chput(comp->compiled_chunk, loc);
-    } else {
-        chput(comp->compiled_chunk, OP_LOAD_8);
-        chput(comp->compiled_chunk, loc);
-    }
+        if (loc == RESOLVED_IS_CLOSURE || loc == RESOLVED_NEED_CLOSURE) {
+            chput(comp->compiled_chunk, OP_PUT_CLOSURE);
+            chput(comp->compiled_chunk, var->is_link-1);
+        } else {
+            if (var->is_link)
+                chput(comp->compiled_chunk, OP_PUT_LINK);
+            else
+                chput(comp->compiled_chunk, OP_PUT_8);
+            chput(comp->compiled_chunk, var->ofsetted + PRIVILEGED_STACK_SLOTS);
+        }
+    } else if (loc == RESOLVED_IS_CLOSURE || loc == RESOLVED_NEED_CLOSURE) {
+            chput(comp->compiled_chunk, OP_LOAD_CLOSURE);
+            chput(comp->compiled_chunk, var->is_link-1);
+        } else {
+            if (var->is_link)
+                chput(comp->compiled_chunk, OP_LOAD_LINK);
+            else
+                chput(comp->compiled_chunk, OP_LOAD_8);
+            chput(comp->compiled_chunk, var->ofsetted + PRIVILEGED_STACK_SLOTS);
+        }
+
 };
 
 static void __comp_if_expression(struct compiler *comp) {
@@ -317,15 +327,22 @@ static void __comp_call(struct compiler *comp) {
 
 static void __comp_fun_expression(struct compiler *comp) {
     __begin_scope(comp);
-    uint32_t function_begin = comp->compiled_chunk->opcount + 11;
+
+    uint8_t (*cl_old)[255] = comp->closures.closures;
+    uint8_t old_count_cl = comp->closures.closure_count;
+
+    comp->closures.closure_count = 0;
+    comp->closures.closures = malloc(255);
+
     chput(comp->compiled_chunk, OP_DECLARE_ANON_FUNCTION);
-    chputn(comp->compiled_chunk, &function_begin, sizeof(uint32_t));
+    uint32_t func_begin = set_uint32(comp);
     uint32_t ar = set_arity(comp);
-    uint32_t j = emit_jump(comp, OP_JUMP);
+    uint32_t j = set_uint32(comp);
 
     panic_if_not_this(comp, GURU_LEFT_PAREN, "function literal has the form of 'fun (x, y) expression'");
     uint8_t arity = 0;
     __start_func_declaration(comp);
+
     while (1) {
         if (comp->now.type == GURU_RIGHT_PAREN) {
             advance(comp);
@@ -340,12 +357,23 @@ static void __comp_fun_expression(struct compiler *comp) {
             break;
         } else advance(comp);
     };
+
     patch_arity(comp, ar, arity);
+    patch_uint32(comp, func_begin, comp->compiled_chunk->opcount);
     __comp_expression(comp);
     chput(comp->compiled_chunk, OP_RETURN);
     __end_func_declaration(comp);
+    patch_uint32(comp, j, comp->compiled_chunk->opcount);
+    chput(comp->compiled_chunk, OP_CLOSURES);
+    chput(comp->compiled_chunk, comp->closures.closure_count);
+    for (uint8_t i = 0; i < comp->closures.closure_count; i++) {
+        chput(comp->compiled_chunk, *comp->closures.closures[i]);
+    }
 
-    confirm_jump(comp, j);
+    free(comp->closures.closures);
+    comp->closures.closures = cl_old;
+    comp->closures.closure_count = old_count_cl;
+
     __end_scope(comp);
 };
 

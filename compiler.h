@@ -8,12 +8,15 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define PRIVILEGED_STACK_SLOTS 3
+#define PRIVILEGED_STACK_SLOTS 4
 
 struct local {
     const struct token name;
     uint16_t depth;
     uint8_t ofsetted;
+    uint8_t compiled_function;
+    uint8_t real;
+    uint8_t is_link; // a local is a link if it has been offloaded to the heap inside a closure
 };
 
 struct compiler {
@@ -42,6 +45,11 @@ struct compiler {
         uint8_t s[255];
         uint8_t head;
     } stack;
+
+    struct {
+        uint8_t closure_count;
+        uint8_t (*closures)[255];
+    } closures;
 };
 
 static const uint16_t ROTTEN        = 0x0001;

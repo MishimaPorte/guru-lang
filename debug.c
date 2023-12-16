@@ -1,6 +1,9 @@
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include "bytecode.h"
 #include "debug.h"
 
 static void __d_simple_instruction(const struct chunk *c, const char *name, const uint8_t *ip) {
@@ -19,20 +22,12 @@ static void __d_one_u32_instruction(const struct chunk *c, const char *name, con
     printf("[%05d] %-26s %08d\n", ip - c->code - 1, name, *(uint32_t*)(ip));
 }
 
-void disassemble_chunk(const struct chunk *c) {
+uint8_t *disassemble_chunk(const struct chunk *c) {
     uint8_t *ip = c->code;
     while (ip != c->code + c->opcount) {
         switch (*ip++) {
         case OP_EXIT: {
             __d_simple_instruction(c, "EXIT", ip);
-            break;
-        }
-        case OP_PRINT_STDOUT: {
-            __d_simple_instruction(c, "PRINT_STDOUT", ip);
-            break;
-        }
-        case OP_PRINT_STDERR: {
-            __d_simple_instruction(c, "PRINT_STDERR", ip);
             break;
         }
         case OP_FLOAT_NEGATE: {
@@ -227,6 +222,24 @@ void disassemble_chunk(const struct chunk *c) {
             ip +=4;
             break;
         }
+        case OP_LOAD_CLOSURE: {
+            __d_one_u8_instruction(c, "OP_LOAD_CLOSURE", ip);
+            ip++;
+            break;
+        }
+        case OP_PUT_CLOSURE: {
+            __d_one_u8_instruction(c, "OP_PUT_CLOSURE", ip); ip++;
+            break;
+        }
+        case OP_LOAD_LINK: {
+            __d_one_u8_instruction(c, "LOAD_LINK", ip);
+            ip++;
+            break;
+        }
+        case OP_PUT_LINK: {
+            __d_one_u8_instruction(c, "PUT_LINK", ip); ip++;
+            break;
+        }
         case OP_LOAD_8: {
             __d_one_u8_instruction(c, "LOAD_8", ip);
             ip++;
@@ -248,23 +261,31 @@ void disassemble_chunk(const struct chunk *c) {
             __d_one_u8_instruction(c, "PUT_8_VOID", ip);ip++;
             break;
         }
-        case OP_PRE_CALL: {
-            __d_one_u8_instruction(c, "PRE_CALL", ip);ip++;
-            break;
-        }
         case OP_CALL: {
             printf("[%05d] %-26s %08d %08d\n", ip - c->code - 1, "CALL", *(ip), *(ip+1));
             ip +=2;
             break;
         }
         case OP_RETURN: {
-            __d_simple_instruction(c, "RETURN", ip);
+            __d_simple_instruction(c, "RETVRN", ip);
             break;
         }
         case OP_DECLARE_ANON_FUNCTION: {
             printf("[%05d] %-26s %08d ", ip - c->code - 1, "DECLARE_ANON_FUNCTION", *(uint32_t*)ip);
             ip+=4;
-            printf("%08d\n", *ip++);
+            printf("%08d ", *ip++);
+            printf("%08d\n", *(uint32_t*)ip);
+            ip+=4;
+            printf("-------------------------|FUNCTION START\n");
+            break;
+        }
+        case OP_CLOSURES: {
+            __d_simple_instruction(c, "CLOSURES", ip);
+            uint8_t x = *ip++;
+            printf("-------------------------|CLOSURE_COUNT: %08d\n", x);
+            for (uint8_t i = 0; i < x; i++) {
+                printf("\t- CLOSURE: %08d\n", *ip++);
+            }
             break;
         }
         case OP_OFFLOAD_REGISTER: {
@@ -274,6 +295,13 @@ void disassemble_chunk(const struct chunk *c) {
         case OP_LOAD_REGISTER: {
             __d_simple_instruction(c, "LOAD_REGISTER", ip);
             break;
+        }
+        default: {
+            char digit[12];
+            sprintf(digit, "UNKNOWN %03d", *(ip-1));
+            __d_simple_instruction(c, digit, ip);
+            break;
         }}
     }
+    return ip;
 }

@@ -11,16 +11,24 @@
 #include "stddef.h"
 
 #define __INITIAL_BLOB_PIT 1024
-#define __INITIAL_STORAGE_PIT 1024
+#define __INITIAL_STORAGE_PIT 0
 
 enum guru_type {
     VAL_BOOL, VAL_NOTHING, VAL_NUMBER,
     VAL_VOID,
     VAL_BYTE, VAL_2BYTE, VAL_4BYTE, VAL_8BYTE,
+    VAL_FILE,
     BLOB_STRING, BLOB_INST, BLOB_VARINT,
-    BLOB_BLOB, BLOB_UNUSED, VAL_LINK,
+    BLOB_BLOB, BLOB_UNUSED,
+
+    //a reference; is used in closures
+    VAL_LINK,
 
     BLOB_CALLABLE,
+    BLOB_NATIVE,
+    BLOB_CLOSURE_VARIABLE, //just a wrapper over a __guru_object
+
+    VAL_ANY, //for natives that want to take any argument type
 
     __PIT_OBJECT_END
 };
@@ -38,9 +46,15 @@ struct __guru_object {
         uint16_t bytes_2;
         uint32_t bytes_4;
         uint64_t bytes_8;
+        void *pointer;
         double numeric;
         struct __blob_header *blob; // tagged heap blobs as 1-class values!
     } as;
+};
+
+struct __value_link {
+    uint64_t rc;
+    struct __guru_object o;
 };
 
 // Garbage collection-related definitions
@@ -69,7 +83,6 @@ void obfree(struct __guru_object *o);
 
 /* Some reduced malloc implementation for use by the memory allocation subsystem of the Guru
  * */
-struct __guru_object *__alloc_go_header(enum guru_type tt);
 struct __blob_header *__alloc_blob(size_t s);
 struct __blob_header *__realloc_blob(struct __blob_header *b, size_t s); // s - new size
 
@@ -78,8 +91,9 @@ struct __blob_header *alloc_string(size_t s);
 struct guru_callable {
     uint32_t func_begin;
     uint8_t arity; // you dont actually need more than 255 arguments to a function
+    struct __guru_object *closures[];
 };
-struct __blob_header *alloc_guru_callable(uint32_t start, uint8_t arity);
+struct __blob_header *alloc_guru_callable(uint32_t start, uint8_t arity, uint8_t closures);
 
 struct __consts {
     uint16_t count;

@@ -14,6 +14,6 @@ static void __d_one_u16_instruction(const struct chunk *c, const char *name, con
 
 static void __d_one_u32_instruction(const struct chunk *c, const char *name, const uint8_t *ip);
 
-void disassemble_chunk(const struct chunk *c);
+uint8_t *disassemble_chunk(const struct chunk *c);
 
 #endif

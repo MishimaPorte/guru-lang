@@ -129,9 +129,9 @@ void set_global(const void *name, size_t nsize, const struct __guru_object *val)
 struct __blob_header *get_int_str(const void *key, size_t ksize) {
     struct __blob_header *blob = get_val(&pit.int_strings, key, ksize);
     if (blob == NULL) {
-        blob = __alloc_blob(ksize);
-        blob->len = ksize;
+        blob = __alloc_blob(ksize+1);
         memcpy(blob->__cont, (void *) key, ksize);
+        *(blob->__cont + ksize) = '\0';
         set_val(&pit.int_strings, key, ksize, blob);
     } else {
         blob->__rc++;
@@ -140,8 +140,8 @@ struct __blob_header *get_int_str(const void *key, size_t ksize) {
     return blob;
 };
 
-struct __blob_header *alloc_guru_callable(uint32_t start, uint8_t arity) {
-    struct __blob_header *blob = __alloc_blob(sizeof(struct guru_callable));
+struct __blob_header *alloc_guru_callable(uint32_t start, uint8_t arity, uint8_t closures) {
+    struct __blob_header *blob = __alloc_blob(sizeof(struct guru_callable)+closures*sizeof(struct __guru_object*));
     ((struct guru_callable*)blob->__cont)->arity = arity;
     ((struct guru_callable*)blob->__cont)->func_begin = start;
 
@@ -160,7 +160,9 @@ void obfree(struct __guru_object *o) {
 void __gc_collect() {
     uint64_t i = 0;
     struct __blob_header *prev = NULL;
+    // printf("______start gc_______\n");
     for (struct __blob_header *h = (struct __blob_header*) pit.__blobs.mem; i != pit.__blobs.cap;) {
+        // printf("length: %lu, rc: %lu, i: %lu, content: %.*s, ptr: %x\n", h->len, h->__rc, i, h->len, h->__cont, h);
         if (h->__rc == 0) {
             if (prev != NULL) {
                 prev->len += h->len;
@@ -179,6 +181,7 @@ void __gc_collect() {
         i += (sizeof(struct __blob_header) + h->len);
         h = __next_blob(h);
     }
+    // printf("______end gc_______\n");
 }
 void collect_all() {
 };

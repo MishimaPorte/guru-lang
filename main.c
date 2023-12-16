@@ -15,7 +15,8 @@ int main(int argc, const char *argv[]) {
     struct guru_vm *vm = vm_init();
 
     if (argc == 1)
-        repl(vm);
+        execf(vm, "main.guru");
+        // repl(vm);
     else if (argc == 2) 
         execf(vm, argv[1]);
     else {

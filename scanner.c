@@ -117,13 +117,13 @@ static void ident_scan_dfa(struct scanner *s, struct token *t) {
     case 'i': {ident_check_kw(t, "f", 1, GURU_IF); break;};
     case 'n': {ident_check_kw(t, "othing", 1, GURU_NOTHING); break;};
     case 'o': {ident_check_kw(t, "r", 1, GURU_OR); break;};
-    case 'p': if (t->len > 5) {
-            switch (t->lexeme[5]) {
-            case 'o': ident_check_kw(t, "ut", 6, GURU_P_OUT); break;
-            case 'e': ident_check_kw(t, "rr", 6, GURU_P_ERR); break;
-        }
-        break;
-    };
+    // case 'p': if (t->len > 5) {
+    //         switch (t->lexeme[5]) {
+    //         case 'o': ident_check_kw(t, "ut", 6, GURU_P_OUT); break;
+    //         case 'e': ident_check_kw(t, "rr", 6, GURU_P_ERR); break;
+    //     }
+    //     break;
+    // };
     case 'r': {ident_check_kw(t, "eturn", 1, GURU_RETURN); break;};
     case 's': {ident_check_kw(t, "uper", 1, GURU_SUPER); break;};
     case 't': {ident_check_kw(t, "rue", 1, GURU_TRUE); break;};

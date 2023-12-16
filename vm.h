@@ -1,13 +1,13 @@
 #ifndef GURU_VM
 #define GURU_VM
 #include "bytecode.h"
-#include "reg_stack.h"
 #include "value.h"
 #include <stdint.h>
 #include <stdio.h>
 
 void __fprint_val(FILE *f, struct __guru_object *val);
 void __print_val(struct __guru_object *val);
+
 
 #define LOCAL_VARIABLE_STACK_SIZE 1024
 #define vm_st_push(v) ((v)->stack.head++)
@@ -25,6 +25,8 @@ void __print_val(struct __guru_object *val);
     struct __guru_object *left = vm_st_pop(v); \
     vm_st_push(v)->as.lift = (left->as).lift op (right->as).lift; \
     vm_st_head(v)->tag = ttag; } while (0)
+
+#define R_FUNC 2
 
 struct guru_vm {
     struct chunk *code;

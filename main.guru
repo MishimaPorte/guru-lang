@@ -1,8 +1,31 @@
-printout (fun (abk, a, b) (fun (abk2) {
-            printout abk2;
-            abk2 + 1;
-        })(a) + (fun (abk2) {
-            printout abk2;
-            abk2 + 1;
-        })(b)
-    )(3, 1, 10);
+var counter_fabrika = fun () {
+    var ad = 0;
+    var c = fun () ad = ad + 1;
+    var d = fun () ad = ad + 1;
+    d();
+    c;
+};
+
+var counter = counter_fabrika();
+var counter1 = counter_fabrika();
+var num = counter();
+num = counter();
+printf(stdout, num);
+num = counter();
+printf(stdout, num);
+num = counter();
+printf(stdout, num);
+num = counter();
+printf(stdout, num);
+num = counter();
+printf(stdout, num);
+num = counter1();
+printf(stdout, num);
+num = counter1();
+printf(stdout, num);
+num = counter1();
+printf(stdout, num);
+num = counter1();
+printf(stdout, num);
+num = counter1();
+printf(stdout, num);
