@@ -33,7 +33,46 @@ void __rehash(struct hashmap *hm, uint64_t new_cap) {
     free(old);
 };
 
-void unset_val(struct hashmap *hm, const void *key, size_t ksize) {
+void *unset_val_r(struct hashmap *hm, const void *key, size_t ksize)
+{
+    for (uint64_t i = hm->hash(key, ksize) % hm->cap;; i = (i+1)%hm->cap) {
+        if (_val_at(hm, i)->key == NULL && (hm->__entries + i)->__key_len != 1) {
+            return NULL;
+        } else if (_val_at(hm, i)->key == NULL && (hm->__entries + i)->__key_len == 1) {
+            continue;
+        } else if (memcmp(_val_at(hm, i)->key, key, ksize) == 0) {
+            _val_at(hm, i)->key = NULL;
+            _val_at(hm, i)->__key_len = 1;
+            return _val_at(hm, i);
+        };
+    };
+};
+
+void iterate_hm_values(struct hashmap *hm, void (*func)(void *val))
+{
+    uint64_t len_counter = 0;
+    for (uint64_t i = 0; i < hm->cap && len_counter < hm->cap; i++)
+        if (_val_at(hm, i)->key != NULL) {
+            func((void *)_val_at(hm, i)->value);
+            len_counter++;
+        }
+    return;
+};
+
+void iterate_hm_values_keys(struct hashmap *hm, void (*func)(void *val, void *key, size_t key_len))
+{
+    uint64_t len_counter = 0;
+    for (uint64_t i = 0; i < hm->cap && len_counter < hm->cap; i++)
+        if (_val_at(hm, i)->key != NULL) {
+            func((void *)_val_at(hm, i)->value, (void *)_val_at(hm, i)->key, _val_at(hm, i)->__key_len);
+            len_counter++;
+        }
+            
+    return;
+};
+
+void unset_val(struct hashmap *hm, const void *key, size_t ksize)
+{
     for (uint64_t i = hm->hash(key, ksize) % hm->cap;; i = (i+1)%hm->cap) {
         if (_val_at(hm, i)->key == NULL && (hm->__entries + i)->__key_len != 1) {
             return;
@@ -46,10 +85,12 @@ void unset_val(struct hashmap *hm, const void *key, size_t ksize) {
         };
     };
 };
-void set_val(struct hashmap *hm, const void *key, size_t ksize, const void *val) {
+
+void set_val(struct hashmap *hm, const void *key, size_t ksize, const void *val)
+{
     for (uint64_t i = hm->hash(key, ksize) % hm->cap;; i = (i+1)%hm->cap) {
         if ((hm->__entries + i)->key == NULL) {
-            if (++hm->len > __max_load(hm)) {
+            if (++hm->len >= __max_load(hm)) {
                 __rehash(hm, hm->cap*2);
             }
             _val_at(hm, i)->value = val;
@@ -59,11 +100,16 @@ void set_val(struct hashmap *hm, const void *key, size_t ksize, const void *val)
         } else if (memcmp(_val_at(hm, i)->key, key, ksize) == 0) {
             _val_at(hm, i)->value = val;
             return;
-        };
+        } else if (hm->len >= __max_load(hm)) __rehash(hm, hm->cap*2);
     };
 };
-void *get_val(struct hashmap *hm, const void *key, size_t ksize) {
-    for (uint64_t i = hm->hash(key, ksize) % hm->cap;; i = (i+1)%hm->cap) {
+
+void *get_val(struct hashmap *hm, const void *key, size_t ksize)
+{
+    for (
+            uint64_t i = hm->hash(key, ksize) % hm->cap;;
+            i = (i+1)%hm->cap
+        ) {
         if (_val_at(hm, i)->key == NULL && _val_at(hm, i)->__key_len != 1) {
             return NULL;
         } else if (_val_at(hm, i)->key == NULL && (hm->__entries + i)->__key_len == 1) {
@@ -73,7 +119,16 @@ void *get_val(struct hashmap *hm, const void *key, size_t ksize) {
         };
     };
 };
-struct hashmap *init_hashmap(struct hashmap *hm) {
+
+void copy_hashmap(struct hashmap *dst, struct hashmap *src)
+{
+    memcpy(dst, src, sizeof(struct hashmap));
+    dst->__entries = calloc(src->cap, sizeof(struct __hm_entry));
+    memcpy(dst->__entries, src->__entries, sizeof(struct __hm_entry)*src->cap);
+};
+
+struct hashmap *init_hashmap(struct hashmap *hm)
+{
     hm->len = 0;
     hm->cap = __HASHMAP_INITIAL_CAPACITY;
     hm->hash = &__vanilla_hash_fnv_1a;

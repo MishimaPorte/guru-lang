@@ -1,13 +1,15 @@
 #include "value.h"
 #include "guru.h"
 #include "hashmap.h"
+#include "vm.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-uint8_t test(const struct __guru_object *val) {
+uint8_t test(const struct __guru_object *val)
+{
     switch (val->tag) {
         case VAL_VOID: case VAL_NOTHING:
             return 0;
@@ -23,12 +25,15 @@ uint8_t test(const struct __guru_object *val) {
     }
 };
 
-void __free_const_array(struct __consts *c) {
+void __free_const_array(struct __consts *c)
+{
     free(c->vals);
     c->count = 0;
     c->capacity = 0;
-}
-uint16_t __add_const(struct __consts *c, void *val, size_t s, enum guru_type tt) {
+};
+
+uint16_t __add_const(struct __consts *c, void *val, size_t s, enum guru_type tt)
+{
     if (c->capacity <= c->count) {
         c->capacity = c->capacity < 8 ? 8 : c->capacity*2;
         c->vals = realloc(c->vals, c->capacity * sizeof(struct __guru_object));
@@ -40,7 +45,16 @@ uint16_t __add_const(struct __consts *c, void *val, size_t s, enum guru_type tt)
     return c->count++;
 }
 
-struct __blob_header *__alloc_blob(uint64_t s) {
+struct __blob_header *alloc_array_of_refs(size_t num)
+{
+    struct __blob_header *bh = __alloc_blob(sizeof(struct array_of_refs) + num * sizeof(struct __guru_object*));
+    ((struct array_of_refs*)bh->__cont)->len = num;
+    return bh;
+};
+
+struct __blob_header *__alloc_blob(uint64_t s)
+{
+    uint64_t free_mem = 0;
 __start:
     if (__ffb->len >= s+sizeof(struct __blob_header) && __ffb->__rc == 0) {
         struct __blob_header *h = __ffb;
@@ -67,7 +81,13 @@ __start:
             return h;
         }
         if (pit.__blobs.cap - ((void*)h - __mem(blobs)) < (sizeof(struct __blob_header) + s)) {
-            __gc_collect();
+            uint64_t i = __gc_collect();
+            if (i == free_mem)
+            {
+                printf("no more memory!\n");
+                exit(69);
+            };
+            free_mem = i;
             goto __start;
         } else {
             h = __next_blob(h);
@@ -94,7 +114,14 @@ struct __blob_header *__realloc_blob(struct __blob_header *b, size_t s) {
     return h;
 }; // s - new size
 
-void init_pit() {
+struct blobs* pit_mem()
+{
+    return &pit.__blobs;
+};
+
+
+void init_pit()
+{
     /*  Initial memory pool allocation;
      * */
     pit.__blobs.mem = malloc(__INITIAL_BLOB_PIT);
@@ -108,7 +135,8 @@ void init_pit() {
     pit.storage = malloc(__INITIAL_STORAGE_PIT);
 };
 
-uint8_t get_global(const void *name, size_t nsize, struct __guru_object *val) {
+uint8_t get_global(const void *name, size_t nsize, struct __guru_object *val)
+{
     struct __blob_header *blob = get_val(&pit.globals, name, nsize);
     if (blob == NULL) return 0;
     if (val == NULL) return 1;
@@ -116,7 +144,9 @@ uint8_t get_global(const void *name, size_t nsize, struct __guru_object *val) {
 
     return 1;
 };
-void set_global(const void *name, size_t nsize, const struct __guru_object *val) {
+
+void set_global(const void *name, size_t nsize, const struct __guru_object *val)
+{
     struct __blob_header *blob = __alloc_blob(sizeof(struct __guru_object));
     memcpy(blob->__cont, val, sizeof(struct __guru_object));
 
@@ -126,43 +156,71 @@ void set_global(const void *name, size_t nsize, const struct __guru_object *val)
     set_val(&pit.globals, name, nsize, blob);
 };
 
-struct __blob_header *get_int_str(const void *key, size_t ksize) {
-    struct __blob_header *blob = get_val(&pit.int_strings, key, ksize);
-    if (blob == NULL) {
+struct __blob_header *get_int_str(const void *key, size_t ksize)
+{
+    struct __blob_header *blob; ;
+    if ((blob = get_val(&pit.int_strings, key, ksize)) == NULL) {
         blob = __alloc_blob(ksize+1);
         memcpy(blob->__cont, (void *) key, ksize);
-        *(blob->__cont + ksize) = '\0';
+        blob->__cont[ksize] = '\0';
         set_val(&pit.int_strings, key, ksize, blob);
-    } else {
-        blob->__rc++;
-    }
+    } else blob->__rc++;
 
     return blob;
 };
 
-struct __blob_header *alloc_guru_callable(uint32_t start, uint8_t arity, uint8_t closures) {
-    struct __blob_header *blob = __alloc_blob(sizeof(struct guru_callable)+closures*sizeof(struct __guru_object*));
+struct __blob_header *alloc_guru_callable(uint32_t start, uint8_t arity, uint8_t closures)
+{
+    struct __blob_header *blob = __alloc_blob(sizeof(struct guru_callable)+(closures + 1)*sizeof(struct __value_link*));
     ((struct guru_callable*)blob->__cont)->arity = arity;
     ((struct guru_callable*)blob->__cont)->func_begin = start;
+    ((struct guru_callable*)blob->__cont)->__is_method = 0;
+    ((struct guru_callable*)blob->__cont)->this = NULL;
 
     return blob;
 };
 
-void obfree(struct __guru_object *o) {
+void obtake(struct __guru_object *o)
+{
     switch (o->tag) {
+      case BLOB_CALLABLE:
+          for (uint8_t i = 0; ((struct guru_callable*)o->as.func->__cont)->closures[i] != NULL; i++) {
+              __take_as_blob(((struct guru_callable*)o->as.func->__cont)->closures[i]);
+          }
+          o->as.blob->__rc++;
+          break;
       case BLOB_STRING: case BLOB_BLOB: case BLOB_INST:
-      case BLOB_VARINT: case BLOB_CALLABLE:
+      case BLOB_VARINT:
+          o->as.blob->__rc++;
+      default:
+          break;
+    }
+};
+
+void obfree(struct __guru_object *o)
+{
+    switch (o->tag) {
+      case BLOB_CALLABLE:
+          for (uint8_t i = 0; ((struct guru_callable*)o->as.func->__cont)->closures[i] != NULL; i++) {
+              (*(((uint64_t*)((struct guru_callable*)o->as.func->__cont)->closures[i])-1))--;
+          }
+          o->as.blob->__rc--;
+          break;
+      case BLOB_STRING: case BLOB_BLOB: case BLOB_INST:
+      case BLOB_VARINT:
           o->as.blob->__rc--;
       default:
           break;
     }
 };
-void __gc_collect() {
+
+uint64_t __gc_collect()
+{
     uint64_t i = 0;
+    uint64_t free_mem = 0;
     struct __blob_header *prev = NULL;
-    // printf("______start gc_______\n");
     for (struct __blob_header *h = (struct __blob_header*) pit.__blobs.mem; i != pit.__blobs.cap;) {
-        // printf("length: %lu, rc: %lu, i: %lu, content: %.*s, ptr: %x\n", h->len, h->__rc, i, h->len, h->__cont, h);
+        printf("length: %lu, rc: %lu, i: %lu, content: %.*s, ptr: %x\n", h->len, h->__rc, i, h->len, h->__cont, h);
         if (h->__rc == 0) {
             if (prev != NULL) {
                 prev->len += h->len;
@@ -174,6 +232,7 @@ void __gc_collect() {
             if (__ffb > h){
                 pit.__blobs.__first_free_offset = (void*)h - pit.__blobs.mem;
             }
+            free_mem += h->len;
             prev = h;
         } else {
             prev = NULL;
@@ -181,7 +240,10 @@ void __gc_collect() {
         i += (sizeof(struct __blob_header) + h->len);
         h = __next_blob(h);
     }
+    return free_mem;
     // printf("______end gc_______\n");
 }
-void collect_all() {
+
+void collect_all()
+{
 };

@@ -7,7 +7,6 @@
 #include "value.h"
 #include "vm.h"
 
-// #define DEBUG_TRACE_EXECUTION
 int main(int argc, const char *argv[]) {
     // struct chunk *c = test_ch();
     // run(vm, c);

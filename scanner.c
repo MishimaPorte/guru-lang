@@ -60,12 +60,14 @@ void scgett(struct scanner *s, struct token *t) {
 
     };
 
-    if (isalpha(c)) for (char c = *s->crnt; ; c = *++s->crnt)
+    if (isalpha(c) || c=='_') for (char c = *s->crnt; ; c = *++s->crnt)
         if (!isalnum(c) && c!='_') {init_token(s, t, GURU_IDENTIFIER); ident_scan_dfa(s, t); return;};
 
     switch (c) {
     case '(': return init_token(s, t, GURU_LEFT_PAREN);
     case ')': return init_token(s, t, GURU_RIGHT_PAREN);
+    case '[': return init_token(s, t, GURU_LEFT_SQ);
+    case ']': return init_token(s, t, GURU_RIGHT_SQ);
     case '{': return init_token(s, t, GURU_LEFT_BRACE);
     case '}': return init_token(s, t, GURU_RIGHT_BRACE);
     case ';': return init_token(s, t, GURU_SEMICOLON);

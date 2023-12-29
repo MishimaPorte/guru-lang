@@ -1,31 +1,20 @@
-var counter_fabrika = fun () {
-    var ad = 0;
-    var c = fun () ad = ad + 1;
-    var d = fun () ad = ad + 1;
-    d();
-    c;
+const class_printer_fabrika = fun (printed) class {
+    fun __constructor() {
+        const i = 0;
+        this.__printed = printed;
+        system.io.print_file(system.io.stdout, "inited");
+    };
+    
+    fun print() {
+        system.io.print_file(system.io.stdout, this.__printed);
+    };
 };
 
-var counter = counter_fabrika();
-var counter1 = counter_fabrika();
-var num = counter();
-num = counter();
-printf(stdout, num);
-num = counter();
-printf(stdout, num);
-num = counter();
-printf(stdout, num);
-num = counter();
-printf(stdout, num);
-num = counter();
-printf(stdout, num);
-num = counter1();
-printf(stdout, num);
-num = counter1();
-printf(stdout, num);
-num = counter1();
-printf(stdout, num);
-num = counter1();
-printf(stdout, num);
-num = counter1();
-printf(stdout, num);
+const printer1 = class_printer_fabrika("kek")();
+const printer2 = class_printer_fabrika("lol")();
+
+
+printer1.print();
+printer2.print();
+printer1.print();
+printer2.print();

@@ -10,7 +10,7 @@ clean:
 
 .PHONY: compile
 compile_debug:
-	$(CC) -o $(DIST) $(SRC_FILES) -g
+	$(CC) -o $(DIST) $(SRC_FILES) -D DEBUG_MODE -ggdb
 
 .PHONY: compile
 compile:

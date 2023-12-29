@@ -1,4 +1,3 @@
-
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -7,19 +6,19 @@
 #include "debug.h"
 
 static void __d_simple_instruction(const struct chunk *c, const char *name, const uint8_t *ip) {
-    printf("[%05d] %-26s\n", ip - c->code - 1, name);
+    printf("[%05ld] %-26s\n", ip - c->code - 1, name);
 }
 
 static void __d_one_u8_instruction(const struct chunk *c, const char *name, const uint8_t *ip) {
-    printf("[%05d] %-26s %08d\n", ip - c->code - 1, name, *(ip));
+    printf("[%05ld] %-26s %08i\n", ip - c->code - 1, name, *(ip));
 }
 
 static void __d_one_u16_instruction(const struct chunk *c, const char *name, const uint8_t *ip) {
-    printf("[%05d] %-26s %08d\n", ip - c->code - 1, name, *(uint16_t*)(ip));
+    printf("[%05ld] %-26s %08u\n", ip - c->code - 1, name, *(uint16_t*)(ip));
 }
 
 static void __d_one_u32_instruction(const struct chunk *c, const char *name, const uint8_t *ip) {
-    printf("[%05d] %-26s %08d\n", ip - c->code - 1, name, *(uint32_t*)(ip));
+    printf("[%05ld] %-26s %08u\n", ip - c->code - 1, name, *(uint32_t*)(ip));
 }
 
 uint8_t *disassemble_chunk(const struct chunk *c) {
@@ -30,8 +29,69 @@ uint8_t *disassemble_chunk(const struct chunk *c) {
             __d_simple_instruction(c, "EXIT", ip);
             break;
         }
+        case OP_FOR_LOOP: {
+            __d_simple_instruction(c, "FOR_LOOP", ip);
+            break;
+        }
+        case OP_FOR_LOOP_END: {
+            __d_simple_instruction(c, "FOR_LOOP_END", ip);
+            break;
+        }
         case OP_FLOAT_NEGATE: {
             __d_simple_instruction(c, "FLOAT_NEGATE", ip);
+            break;
+        }
+        case OP_SET: {
+            printf("[%05ld] %-26s [%s]\n", ip - c->code - 1, "SET", c->consts.vals[*ip].as.blob->__cont);
+            ip++;
+            break;
+        }
+        case OP_SET_16: {
+            __d_one_u16_instruction(c, "SET_16", ip);
+            ip++;
+            ip++;
+            break;
+        }
+        case OP_GET: {
+            printf("[%05ld] %-26s", ip - c->code - 1, "GET");
+            printf(" [%s]\n", c->consts.vals[*ip++].as.blob->__cont);
+            break;
+        }
+        case OP_GET_16: {
+            printf("[%05ld] %-26s", ip - c->code - 1, "GET_16");
+            printf(" [%s]\n", c->consts.vals[*ip++].as.blob->__cont);
+            ip++;
+            break;
+        }
+        case OP_DECLARE_FUNCTION: {
+            ip+=1;
+            printf("[%05ld] %-26s %08i\n", ip - c->code - 1, "DECLARE_FUNCTION", *(ip));
+            uint8_t closure_count = *ip++;
+            for (uint8_t i = closure_count; i > 0; i--) {
+                printf("\tCLOSURE: [%d]\n", *ip++);
+            };
+            break;
+        }
+        case OP_DECLARE_CLASS: {
+            ip+=1;
+            printf("[%05ld] %-26s %08i\n", ip - c->code - 1, "DECLARE_CLASS", *(ip));
+            uint8_t meth_count = *ip++;
+            for (uint8_t i = meth_count; i > 0; i--) {
+                uint16_t cons = *(uint16_t*)ip;
+                ip+=2;
+                printf("\tMETHOD: [%s]\n", c->consts.vals[cons].as.blob->__cont);
+            };
+            break;
+        }
+        case OP_DECLARE_CLASS_16: {
+            ip+=2;
+            printf("[%05ld] %-26s %08i\n", ip - c->code - 1, "DECLARE_CLASS", *(ip));
+            uint8_t meth_count = *ip++;
+            for (uint8_t i = meth_count; i > 0; i--) {
+                uint16_t cons = *(uint16_t*)ip;
+                ip+=2;
+                printf("\tMETHOD: [%s]", c->consts.vals[cons].as.blob->__cont);
+            };
             break;
         }
         case OP_CONST: {
@@ -141,12 +201,12 @@ uint8_t *disassemble_chunk(const struct chunk *c) {
             __d_simple_instruction(c, "STRING_EQ", ip);
             break;
         }
-        case OP_OP: {
-            __d_simple_instruction(c, "OP", ip);
+        case OP_OP_NOFREE: {
+            __d_simple_instruction(c, "OP_NOFREE", ip);
             break;
         }
-        case OP_POP_MANY: {
-            __d_simple_instruction(c, "POP_MANY", ip);
+        case OP_OP: {
+            __d_simple_instruction(c, "OP", ip);
             break;
         }
         case OP_DEFINE_GLOBAL: {
@@ -188,8 +248,9 @@ uint8_t *disassemble_chunk(const struct chunk *c) {
             printf("[%05d] %-26s [%.*s]\n", i, "ASSIGN_GLOBAL_16", blob->len, blob->__cont);
             break;
         }
-        case OP_CLEAN_AFTER_BLOCK: {
-            __d_simple_instruction(c, "CLEAN_AFTER_BLOCK", ip);
+        case OP_COLLECT_LOCALS: {
+            __d_one_u16_instruction(c, "COLLECT_LOCALS", ip);
+            ip +=2;
             break;
         }
         case OP_JUMP_IF_FALSE: {
@@ -266,34 +327,12 @@ uint8_t *disassemble_chunk(const struct chunk *c) {
             ip +=2;
             break;
         }
+        case OP_LOAD_THIS: {
+            __d_simple_instruction(c, "LOAD_THIS", ip);
+            break;
+        }
         case OP_RETURN: {
             __d_simple_instruction(c, "RETVRN", ip);
-            break;
-        }
-        case OP_DECLARE_ANON_FUNCTION: {
-            printf("[%05d] %-26s %08d ", ip - c->code - 1, "DECLARE_ANON_FUNCTION", *(uint32_t*)ip);
-            ip+=4;
-            printf("%08d ", *ip++);
-            printf("%08d\n", *(uint32_t*)ip);
-            ip+=4;
-            printf("-------------------------|FUNCTION START\n");
-            break;
-        }
-        case OP_CLOSURES: {
-            __d_simple_instruction(c, "CLOSURES", ip);
-            uint8_t x = *ip++;
-            printf("-------------------------|CLOSURE_COUNT: %08d\n", x);
-            for (uint8_t i = 0; i < x; i++) {
-                printf("\t- CLOSURE: %08d\n", *ip++);
-            }
-            break;
-        }
-        case OP_OFFLOAD_REGISTER: {
-            __d_simple_instruction(c, "OFFLOAD_REGISTER", ip);
-            break;
-        }
-        case OP_LOAD_REGISTER: {
-            __d_simple_instruction(c, "LOAD_REGISTER", ip);
             break;
         }
         default: {

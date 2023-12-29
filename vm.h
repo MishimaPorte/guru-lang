@@ -10,14 +10,32 @@ void __print_val(struct __guru_object *val);
 
 
 #define LOCAL_VARIABLE_STACK_SIZE 1024
-#define vm_st_push(v) ((v)->stack.head++)
+
+#ifdef DEBUG_MODE
+#define comp_binary_op(v, ip, op, ttag, lift)  { \
+    if (__get_stack_val(v, 0).tag != ttag) __runtime_error(v, ip-2, "expecting number operands, but got %s", type_names_map[__get_stack_val(v, 0).tag]); \
+    if (__get_stack_val(v, 1).tag != ttag) __runtime_error(v, ip-3, "expecting number operands, but got %s", type_names_map[__get_stack_val(v, 1).tag]); \
+    struct __guru_object *right = vm_st_pop(v); \
+    struct __guru_object *left = vm_st_pop(v); \
+    *vm_st_push(v) = (left->as).lift op (right->as).lift ? __GURU_TRUE : __GURU_FALSE;} while (0)
+#else
 #define comp_binary_op(v, ip, op, ttag, lift)  { \
     if (__get_stack_val(v, 0).tag != ttag) __runtime_error(v, ip-2, "expecting number operands"); \
     if (__get_stack_val(v, 1).tag != ttag) __runtime_error(v, ip-3, "expecting number operands"); \
     struct __guru_object *right = vm_st_pop(v); \
     struct __guru_object *left = vm_st_pop(v); \
     *vm_st_push(v) = (left->as).lift op (right->as).lift ? __GURU_TRUE : __GURU_FALSE;} while (0)
+#endif
 
+#ifdef DEBUG_MODE
+#define binary_op(v, ip, op, ttag, lift) do { \
+    if (__get_stack_val(v, 0).tag != ttag) __runtime_error(v, ip-2, "expecting number operands, but got %s", type_names_map[__get_stack_val(v, 0).tag]); \
+    if (__get_stack_val(v, 1).tag != ttag) __runtime_error(v, ip-3, "expecting number operands, but got %s", type_names_map[__get_stack_val(v, 1).tag]); \
+    struct __guru_object *right = vm_st_pop(v); \
+    struct __guru_object *left = vm_st_pop(v); \
+    vm_st_push(v)->as.lift = (left->as).lift op (right->as).lift; \
+    vm_st_head(v)->tag = ttag; } while (0)
+#else
 #define binary_op(v, ip, op, ttag, lift) do { \
     if (__get_stack_val(v, 0).tag != ttag) __runtime_error(v, ip-2, "expecting number operands"); \
     if (__get_stack_val(v, 1).tag != ttag) __runtime_error(v, ip-3, "expecting number operands"); \
@@ -25,8 +43,14 @@ void __print_val(struct __guru_object *val);
     struct __guru_object *left = vm_st_pop(v); \
     vm_st_push(v)->as.lift = (left->as).lift op (right->as).lift; \
     vm_st_head(v)->tag = ttag; } while (0)
+#endif
 
-#define R_FUNC 2
+#define R_RETURN_INSTR_PTR      0
+#define R_RETURN_STACK_FRAME    1
+#define R_FUNC                  2
+#define R_THIS                  3
+
+#define FLAG_CONSTRUCTOR        0x8000000000000000
 
 struct guru_vm {
     struct chunk *code;
@@ -68,8 +92,10 @@ enum exec_code run(struct guru_vm *v, struct chunk *c);
             line = i->line; \
             break; }} while (0)
 
+#define vm_st_push(v) ((v)->stack.head++)
 #define vm_st_head(v) ((v)->stack.head-1)
 #define vm_st_pop(v) (--(v)->stack.head)
+
 #define __get_stack_val(v, i) ((v)->stack.head[-1 - i])
 #define __val_eq(l, r) ((((l)->tag == (r)->tag)) && memcmp(&(l)->as, &(r)->as, sizeof((l)->as)) == 0 ? __GURU_TRUE : __GURU_FALSE)
 #define __val_neq(l, r) (((l)->tag != (r)->tag) || memcmp(&(l)->as, &(r)->as, sizeof((l)->as)) != 0 ? __GURU_TRUE : __GURU_FALSE)

@@ -4,9 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <wchar.h>
 
 #ifndef __HASHMAP_INITIAL_CAPACITY
-#define __HASHMAP_INITIAL_CAPACITY 64
+#define __HASHMAP_INITIAL_CAPACITY 164
 #endif
 
 #ifndef __HASHMAP_ACCEPTABLE_LOAD
@@ -32,10 +33,15 @@ struct hashmap {
     struct __hm_entry *__entries;
 };
 
+void iterate_hm_values_keys(struct hashmap *hm, void (*func)(void *val, void *key, size_t key_len));
+void iterate_hm_values(struct hashmap *hm, void (*func)(void *val));
+
 void set_val(struct hashmap *hm, const void *key, size_t ksize, const void *val);
 void unset_val(struct hashmap *hm, const void *key, size_t ksize);
+void *unset_val_r(struct hashmap *hm, const void *key, size_t ksize);
 void *get_val(struct hashmap *hm, const void *key, size_t ksize);
 struct hashmap *init_hashmap(struct hashmap *hm); //need calloc'ed memory, i think??
+void copy_hashmap(struct hashmap *dst, struct hashmap *src);
 
 #define _val_at(hm, i) (hm->__entries + i)
 #define __max_load(hm) ((hm)->cap * __HASHMAP_ACCEPTABLE_LOAD)

@@ -1,6 +1,7 @@
 #include "compiler.h"
 #include "bytecode.h"
 #include "hashmap.h"
+#include "object.h"
 #include "scanner.h"
 #include "value.h"
 #include "compiler_utils.h"
@@ -58,99 +59,135 @@ enum exec_code compile(const char *source, struct chunk *c) {
 }
 
 static void __comp_statement(struct compiler *comp) {
-    if (comp->now.type == GURU_VAR) {
-        advance(comp);
-        panic_if_not_this(comp, GURU_IDENTIFIER, "vars are initialized with identifiers");
+    switch (comp->now.type) {
+        case GURU_CONST:
+            advance(comp);
+            panic_if_not_this(comp, GURU_IDENTIFIER, "vars are initialized with identifiers");
 
-        if (comp->scope_depth != 0) {
-            uint8_t i = __loc_var_decl(comp);
-            if (comp->now.type == GURU_EQUAL) {
-                advance(comp);
+            if (comp->scope_depth != 0) {
+                uint8_t i = __loc_var_decl(comp);
+                panic_if_not_this(comp, GURU_EQUAL, "must init a constant");
+                // advance(comp);
                 __comp_expression(comp);
                 chput(comp->compiled_chunk, OP_PUT_8_WITH_POP);
                 chput(comp->compiled_chunk, i);
+                __loc_const_init(comp);
             } else {
-                chput(comp->compiled_chunk, OP_PUT_8_VOID);
-                chput(comp->compiled_chunk, i);
-                chput(comp->compiled_chunk, OP_OP);
-            }
-            __loc_var_init(comp);
-        } else {
-            struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
-            if (comp->now.type == GURU_EQUAL) {
-                advance(comp);
+                struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
+                panic_if_not_this(comp, GURU_EQUAL, "must init a constant");
                 __comp_expression(comp);
-            } else {
-                chput(comp->compiled_chunk, OP_LOAD_VOID);
-            }
-            __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_16);
-        } 
-    } else if (comp->now.type == GURU_FOR) {
-        advance(comp);
-        __begin_scope(comp);
-        panic_if_not_this(comp, GURU_LEFT_PAREN, "for loop clauses should be parenthesized");
-        //INFO: initializer clause
-        if (comp->now.type == GURU_VAR) {
+                __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_16);
+            } 
+            break;
+        case GURU_VAR:
             advance(comp);
             panic_if_not_this(comp, GURU_IDENTIFIER, "vars are initialized with identifiers");
-            uint8_t i = __loc_var_decl(comp);
-            if (comp->now.type == GURU_EQUAL) {
-                advance(comp);
-                __comp_expression(comp);
-                chput(comp->compiled_chunk, OP_PUT_8);
+
+            if (comp->scope_depth != 0) {
+                uint8_t i = __loc_var_decl(comp);
+                if (comp->now.type == GURU_EQUAL) {
+                    advance(comp);
+                    __comp_expression(comp);
+                    chput(comp->compiled_chunk, OP_PUT_8_WITH_POP);
+                    chput(comp->compiled_chunk, i);
+                } else {
+                    chput(comp->compiled_chunk, OP_PUT_8_VOID);
+                    chput(comp->compiled_chunk, i);
+                    chput(comp->compiled_chunk, OP_OP);
+                }
+                __loc_var_init(comp);
             } else {
-                chput(comp->compiled_chunk, OP_PUT_8_VOID);
+                struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
+                if (comp->now.type == GURU_EQUAL) {
+                    advance(comp);
+                    __comp_expression(comp);
+                } else {
+                    chput(comp->compiled_chunk, OP_LOAD_VOID);
+                }
+                __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_16);
+            } 
+            break;
+        case GURU_RETURN:
+            if (comp->block_stack == 0 || comp->stack.head == 0)
+                comp_err_report(comp, &comp->now, "return only inside a block functions");
+            advance(comp);
+            __comp_expression(comp);
+            chput(comp->compiled_chunk, OP_COLLECT_LOCALS);
+            uint16_t loc_count = __count_locals(comp);
+            chputn(comp->compiled_chunk, &loc_count, sizeof(loc_count));
+            chput(comp->compiled_chunk, OP_RETURN);
+            break;
+        case GURU_FOR:
+            // chput(comp->compiled_chunk, OP_FOR_LOOP);
+            advance(comp);
+            __begin_scope(comp);
+            panic_if_not_this(comp, GURU_LEFT_PAREN, "for loop clauses should be parenthesized");
+            //INFO: initializer clause
+            if (comp->now.type == GURU_VAR) {
+                advance(comp);
+                panic_if_not_this(comp, GURU_IDENTIFIER, "vars are initialized with identifiers");
+                uint8_t i = __loc_var_decl(comp);
+                if (comp->now.type == GURU_EQUAL) {
+                    advance(comp);
+                    __comp_expression(comp);
+                    chput(comp->compiled_chunk, OP_PUT_8);
+                } else {
+                    chput(comp->compiled_chunk, OP_PUT_8_VOID);
+                }
+                chput(comp->compiled_chunk, i);
+                __loc_var_init(comp);
+            } else if (comp->now.type != GURU_SEMICOLON) {
+                __comp_expression(comp);
+                chput(comp->compiled_chunk, OP_OP);
             }
-            chput(comp->compiled_chunk, i);
-            __loc_var_init(comp);
-        } else if (comp->now.type != GURU_SEMICOLON) {
+            panic_if_not_this(comp, GURU_SEMICOLON, "unterminated for loop initializer");
+
+            //INFO: condition clause
+            uint32_t ex = 0;
+            uint32_t cond_loop = comp->compiled_chunk->opcount;
+            if (comp->now.type != GURU_SEMICOLON) {
+                __comp_expression(comp);
+                ex = emit_jump(comp, OP_JUMP_IF_FALSE);
+            }
+            panic_if_not_this(comp, GURU_SEMICOLON, "unterminated for loop condition");
+            //INFO: increment clause
+            uint32_t incr_loop = 0;
+            if (comp->now.type != GURU_RIGHT_PAREN) {
+                uint32_t increment = emit_jump(comp, OP_JUMP);
+                incr_loop = comp->compiled_chunk->opcount;
+                __comp_expression(comp);
+                chput(comp->compiled_chunk, OP_OP);
+                jump_to(comp, OP_JUMP_BACK, cond_loop);
+                confirm_jump(comp, increment);
+            }
+            panic_if_not_this(comp, GURU_RIGHT_PAREN, "for loop clauses should be parenthesized");
+
+            //INFO: loop body
+            __comp_statement(comp);
+
+            if (incr_loop != 0) jump_to(comp, OP_JUMP_BACK, incr_loop);
+            else jump_to(comp, OP_JUMP_BACK, cond_loop);
+            
+            if (ex != 0) {
+                confirm_jump(comp, ex);
+            };
+            __end_scope(comp);
+            // chput(comp->compiled_chunk, OP_FOR_LOOP_END);
+            return;
+        case GURU_WHILE:
+            advance(comp);
+            uint32_t loop = comp->compiled_chunk->opcount;
+            panic_if_not_this(comp, GURU_LEFT_PAREN, "condition must be in parentheses");
+            __comp_expression(comp);
+            panic_if_not_this(comp, GURU_RIGHT_PAREN, "condition must be in parentheses");
+            uint32_t jump = emit_jump(comp, OP_JUMP_IF_FALSE);
+            __comp_statement(comp);
+            jump_to(comp, OP_JUMP_BACK, loop);
+            confirm_jump(comp, jump);
+            return;
+        default:
             __comp_expression(comp);
             chput(comp->compiled_chunk, OP_OP);
-        }
-        panic_if_not_this(comp, GURU_SEMICOLON, "unterminated for loop initializer");
-
-        //INFO: condition clause
-        uint32_t ex = 0;
-        uint32_t cond_loop = comp->compiled_chunk->opcount;
-        if (comp->now.type != GURU_SEMICOLON) {
-            __comp_expression(comp);
-            uint32_t ex = emit_jump(comp, OP_JUMP_IF_FALSE);
-        }
-        panic_if_not_this(comp, GURU_SEMICOLON, "unterminated for loop condition");
-        //INFO: increment clause
-        uint32_t incr_loop = 0;
-        if (comp->now.type != GURU_RIGHT_PAREN) {
-            uint32_t increment = emit_jump(comp, OP_JUMP);
-            incr_loop = comp->compiled_chunk->opcount;
-            __comp_expression(comp);
-            chput(comp->compiled_chunk, OP_OP);
-            jump_to(comp, OP_JUMP_BACK, cond_loop);
-            confirm_jump(comp, increment);
-        }
-        panic_if_not_this(comp, GURU_RIGHT_PAREN, "for loop clauses should be parenthesized");
-
-        //INFO: loop body
-        __comp_statement(comp);
-
-        if (incr_loop != 0) jump_to(comp, OP_JUMP_BACK, incr_loop);
-        else jump_to(comp, OP_JUMP_BACK, cond_loop);
-        if (ex != 0) confirm_jump(comp, ex);
-        __end_scope(comp);
-        return;
-    } else if (comp->now.type == GURU_WHILE) {
-        advance(comp);
-        uint32_t loop = comp->compiled_chunk->opcount;
-        panic_if_not_this(comp, GURU_LEFT_PAREN, "condition must be in parentheses");
-        __comp_expression(comp);
-        panic_if_not_this(comp, GURU_RIGHT_PAREN, "condition must be in parentheses");
-        uint32_t ex = emit_jump(comp, OP_JUMP_IF_FALSE);
-        __comp_statement(comp);
-        jump_to(comp, OP_JUMP_BACK, loop);
-        confirm_jump(comp, ex);
-        return;
-    } else {
-        __comp_expression(comp);
-        chput(comp->compiled_chunk, OP_OP);
     }
     panic_if_not_this(comp, GURU_SEMICOLON, "unterminated statement!");
 }
@@ -189,6 +226,14 @@ static void __comp_expression(struct compiler *comp) {
 static void __comp_identifier(struct compiler *comp) {
     struct local *var;
     enum local_resolved loc;
+    if (memcmp(comp->then.lexeme, "this", 4) == 0) {
+        if (comp->now.type == GURU_EQUAL) {
+            comp_err_report(comp, &comp->now, "cant assign to this");
+            return;
+        };
+        chput(comp->compiled_chunk, OP_LOAD_THIS);
+        return;
+    };
     if ((loc = resolve_local(comp, &var)) == RESOLVED_NON_LOCAL) {
         struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
         if (comp->now.type == GURU_EQUAL) {
@@ -205,6 +250,10 @@ static void __comp_identifier(struct compiler *comp) {
         return;
     }
     if (comp->now.type == GURU_EQUAL) {
+        if (var->is_const == 1) {
+            comp_err_report(comp, &comp->now, "cant assign a const");
+            return;
+        }
         if (!(comp->state & ASSIGN_PERMIT)) {
             comp_err_report(comp, &comp->then, "assignment not allowed here");
             return;
@@ -224,13 +273,13 @@ static void __comp_identifier(struct compiler *comp) {
     } else if (loc == RESOLVED_IS_CLOSURE || loc == RESOLVED_NEED_CLOSURE) {
             chput(comp->compiled_chunk, OP_LOAD_CLOSURE);
             chput(comp->compiled_chunk, var->is_link-1);
-        } else {
-            if (var->is_link)
-                chput(comp->compiled_chunk, OP_LOAD_LINK);
-            else
-                chput(comp->compiled_chunk, OP_LOAD_8);
-            chput(comp->compiled_chunk, var->ofsetted + PRIVILEGED_STACK_SLOTS);
-        }
+    } else {
+        if (var->is_link)
+            chput(comp->compiled_chunk, OP_LOAD_LINK);
+        else
+            chput(comp->compiled_chunk, OP_LOAD_8);
+        chput(comp->compiled_chunk, var->ofsetted + PRIVILEGED_STACK_SLOTS);
+    }
 
 };
 
@@ -334,10 +383,7 @@ static void __comp_fun_expression(struct compiler *comp) {
     comp->closures.closure_count = 0;
     comp->closures.closures = malloc(255);
 
-    chput(comp->compiled_chunk, OP_DECLARE_ANON_FUNCTION);
-    uint32_t func_begin = set_uint32(comp);
-    uint32_t ar = set_arity(comp);
-    uint32_t j = set_uint32(comp);
+    uint32_t jump = emit_jump(comp, OP_JUMP);
 
     panic_if_not_this(comp, GURU_LEFT_PAREN, "function literal has the form of 'fun (x, y) expression'");
     uint8_t arity = 0;
@@ -358,13 +404,13 @@ static void __comp_fun_expression(struct compiler *comp) {
         } else advance(comp);
     };
 
-    patch_arity(comp, ar, arity);
-    patch_uint32(comp, func_begin, comp->compiled_chunk->opcount);
+    uint32_t func_begin_v = comp->compiled_chunk->opcount;
     __comp_expression(comp);
     chput(comp->compiled_chunk, OP_RETURN);
     __end_func_declaration(comp);
-    patch_uint32(comp, j, comp->compiled_chunk->opcount);
-    chput(comp->compiled_chunk, OP_CLOSURES);
+    confirm_jump(comp, jump);
+    struct __blob_header *h = alloc_guru_callable(func_begin_v, arity, comp->closures.closure_count);
+    __insert_op(comp, &h, sizeof(h), BLOB_CALLABLE, OP_DECLARE_FUNCTION, OP_DECLARE_FUNCTION_16);
     chput(comp->compiled_chunk, comp->closures.closure_count);
     for (uint8_t i = 0; i < comp->closures.closure_count; i++) {
         chput(comp->compiled_chunk, *comp->closures.closures[i]);
@@ -394,7 +440,9 @@ static void __comp_block_expression(struct compiler *comp) {
     }
     panic_if_not_this(comp, GURU_RIGHT_BRACE, "unmatched left brace");
     chunputif(comp->compiled_chunk, OP_OP, OP_LOAD_NOTHING);
-    __end_scope(comp);
+    uint16_t i = __end_scope(comp);
+    chput(comp->compiled_chunk, OP_COLLECT_LOCALS);
+    chputn(comp->compiled_chunk, &i, sizeof(i));
     comp->block_stack--;
 };
 
@@ -406,27 +454,175 @@ static void __comp_with_precedence(struct compiler *comp, enum comp_precedence p
     } else advance(comp);
     
     
+    uint16_t old_state = comp->state;
     if (prec <= __PREC_ASSIGNMENT)
         comp->state |= ASSIGN_PERMIT;
     else comp->state &= (~ASSIGN_PERMIT);
     pref_fn(comp);
-    comp->state &= (~ASSIGN_PERMIT);
 
     while (prec <= __get_pratt_rule(comp->now.type)->prec) {
         advance(comp);
         __get_pratt_rule(comp->then.type)->infix_fn(comp);
     }
+    if (comp->state & PANIC_MODE) old_state |= PANIC_MODE;
+    if (comp->state & ROTTEN) old_state |= ROTTEN;
+    comp->state = old_state;
 };
 
+static void __comp_class(struct compiler *comp)
+{
+    panic_if_not_this(comp, GURU_LEFT_BRACE, "class literal has the form of 'class {things}'");
 
+    uint8_t i = 0;
+
+    struct u16_array_list *u16al = init_u16_array_list(10);
+
+    struct __blob_header *blob_cl = alloc_class();
+    struct guru_class *cl = (struct guru_class*)blob_cl->__cont;
+
+    for (;;) {
+        i++;
+        switch (comp->now.type) {
+            case GURU_FUN:
+                advance(comp);
+                panic_if_not_this(comp, GURU_IDENTIFIER, "a method should have a name");
+
+                struct __blob_header *name = __alloc_blob(comp->then.len + 1);
+                memcpy(name->__cont, comp->then.lexeme, comp->then.len);
+                name->__cont[comp->then.len] = '\0';
+
+                uint16_t const_i = add_const(comp->compiled_chunk, &name, sizeof(name), BLOB_STRING);
+                append(u16al, const_i);
+
+                __begin_scope(comp);
+                uint8_t (*cl_old)[255] = comp->closures.closures;
+                uint8_t old_count_cl = comp->closures.closure_count;
+
+                comp->closures.closure_count = 0;
+                comp->closures.closures = malloc(255);
+
+
+                uint32_t jump = emit_jump(comp, OP_JUMP);
+
+                panic_if_not_this(comp, GURU_LEFT_PAREN, "function literal has the form of 'fun (x, y) expression'");
+                uint8_t arity = 0;
+                __start_func_declaration(comp);
+
+                while (1) {
+                    if (comp->now.type == GURU_RIGHT_PAREN) {
+                        advance(comp);
+                        break;
+                    };
+                    panic_if_not_this(comp, GURU_IDENTIFIER, "function params are identifiers");
+                    uint8_t i = __loc_var_decl(comp);
+                    __loc_var_init(comp);
+                    arity++;
+                    if (comp->now.type != GURU_COMMA) {
+                        panic_if_not_this(comp, GURU_RIGHT_PAREN, "need a closing parentheses");
+                        break;
+                    } else advance(comp);
+                };
+
+                uint32_t func_begin_v = comp->compiled_chunk->opcount;
+                __comp_expression(comp);
+                if (strcmp("__constructor", name->__cont) == 0)
+                {
+                    chput(comp->compiled_chunk, OP_OP);
+                    chput(comp->compiled_chunk, OP_LOAD_THIS);
+                }
+                chput(comp->compiled_chunk, OP_RETURN);
+                __end_func_declaration(comp);
+                confirm_jump(comp, jump);
+                
+                struct __blob_header *h = alloc_guru_callable(func_begin_v, arity, comp->closures.closure_count);
+                __insert_op(comp, &h, sizeof(h), BLOB_CALLABLE, OP_DECLARE_FUNCTION, OP_DECLARE_FUNCTION_16);
+                ((struct guru_callable*)h->__cont)->__is_method = 1;
+                chput(comp->compiled_chunk, comp->closures.closure_count);
+                for (uint8_t i = 0; i < comp->closures.closure_count; i++) {
+                    chput(comp->compiled_chunk, *comp->closures.closures[i]);
+                }
+
+                free(comp->closures.closures);
+                comp->closures.closures = cl_old;
+                comp->closures.closure_count = old_count_cl;
+
+                __end_scope(comp);
+
+                panic_if_not_this(comp, GURU_SEMICOLON, "a forgotten semicolon");
+                break;
+            case GURU_VAR:
+                advance(comp);
+                panic_if_not_this(comp, GURU_IDENTIFIER, "a realm must have a king; a field must have a name that is an identifier");
+                struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
+                if (comp->now.type == GURU_EQUAL) {
+                    advance(comp);
+                    __comp_expression(comp);
+                } else {
+                    chput(comp->compiled_chunk, OP_LOAD_VOID);
+                }
+                // __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_DEFINE_CLASSVAR, OP_DEFINE_CLASSVAR_16);
+                break;
+            default:
+                comp_err_report(comp, &comp->now, "this is not allowed in class literal");
+                break;
+        }
+        if (comp->now.type == GURU_RIGHT_BRACE) {
+            advance(comp);
+            break;
+        };
+    };
+
+    __insert_op(comp, &blob_cl, sizeof(blob_cl), BLOB_CLASS, OP_DECLARE_CLASS, OP_DECLARE_CLASS_16);
+    chput(comp->compiled_chunk, i);
+    for (uint16_t it = i; it > 0; it--) {
+        uint16_t var = get(u16al, it-1);
+        chputn(comp->compiled_chunk, &var, 2);
+    }
+};
+
+static void __comp_index_sq(struct compiler *comp)
+{
+    __comp_expression(comp); // index expression
+    panic_if_not_this(comp, GURU_RIGHT_SQ, "close your index expressions with square brackets");
+
+    if (comp->now.type == GURU_EQUAL) {
+        advance(comp);
+        __comp_expression(comp);
+        chput(comp->compiled_chunk, OP_INDEX_SET);
+    } else {
+        chput(comp->compiled_chunk, OP_INDEX_GET);
+    }
+};
+
+static void __comp_getset(struct compiler *comp)
+{
+    panic_if_not_this(comp, GURU_IDENTIFIER, "expected an identifier after the dot");
+    struct __blob_header *blob = get_int_str(comp->then.lexeme, comp->then.len);
+    if (comp->now.type == GURU_EQUAL)
+    {
+        advance(comp);
+        __comp_expression(comp);
+        // __comp_with_precedence(comp, __PREC_CALL);
+        if (comp->state & ASSIGN_PERMIT)
+            __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_SET, OP_SET_16);
+        else {
+            comp_err_report(comp, &comp->now, "cannot assign here");
+            return;
+        };
+    } else {
+        __insert_op(comp, &blob, sizeof(blob), BLOB_STRING, OP_GET, OP_GET_16);
+    }
+};
 
 static struct pratt_rule pratt_table[] = {
     [GURU_LEFT_PAREN] = {&__comp_grouping, &__comp_call, __PREC_CALL},
     [GURU_RIGHT_PAREN] = {NULL, NULL, __PREC_NONE},
     [GURU_LEFT_BRACE] = {&__comp_block_expression, NULL, __PREC_NONE},
     [GURU_RIGHT_BRACE] = {NULL, NULL, __PREC_NONE},
+    [GURU_LEFT_SQ] = {NULL, &__comp_index_sq, __PREC_CALL},
+    [GURU_RIGHT_SQ] = {NULL, NULL, __PREC_NONE},
     [GURU_COMMA] = {NULL, NULL, __PREC_NONE},
-    [GURU_DOT] = {NULL, NULL, __PREC_NONE},
+    [GURU_DOT] = {NULL, &__comp_getset, __PREC_CALL},
     [GURU_MINUS] = {&__comp_unary, &__comp_binary, __PREC_TERM},
     [GURU_PLUS] = {NULL, &__comp_binary, __PREC_TERM},
     [GURU_SEMICOLON] = {NULL, NULL, __PREC_NONE},
@@ -470,7 +666,7 @@ static struct pratt_rule pratt_table[] = {
 
     [GURU_RETURN] = {NULL, NULL, __PREC_NONE},
 
-    [GURU_CLASS] = {NULL, NULL, __PREC_NONE},
+    [GURU_CLASS] = {&__comp_class, NULL, __PREC_NONE},
     [GURU_SUPER] = {NULL, NULL, __PREC_NONE},
     [GURU_THIS] = {NULL, NULL, __PREC_NONE},
 };

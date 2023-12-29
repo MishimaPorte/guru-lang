@@ -13,6 +13,7 @@
 struct local {
     const struct token name;
     uint16_t depth;
+    uint8_t is_const;
     uint8_t ofsetted;
     uint8_t compiled_function;
     uint8_t real;
@@ -24,12 +25,14 @@ struct compiler {
     struct chunk *compiled_chunk;
     struct token now;
     struct token then;
+    struct u32_array_list *jumps_needed; // TODO: do this tomorrow
     uint32_t line;
 
     /*
      *  0x0001 is set if compiler had any kinds of errors;
      *  0x0002 is set if compiler is currently in panic mode;
      *  0x0004 is set if the compiler is now compiling something inside which it can do assignment;
+     *  0x0008 is set if the compiler is now compiling a constructor;
      * */
     uint16_t state;
 
@@ -55,6 +58,7 @@ struct compiler {
 static const uint16_t ROTTEN        = 0x0001;
 static const uint16_t PANIC_MODE    = 0x0002;
 static const uint16_t ASSIGN_PERMIT = 0x0004;
+static const uint16_t F_CONSTRUCTOR = 0x0008;
 
 enum comp_precedence {
     __PREC_NONE,
@@ -66,12 +70,13 @@ enum comp_precedence {
     __PREC_TERM, // + -
     __PREC_FACTOR, // * /
     __PREC_UNARY, // ! -
-    __PREC_CALL, // . ()
+    __PREC_CALL, // . () []
     __PREC_PRIMARY
 };
 static void __synchronize(struct compiler *comp);
 static void __comp_with_precedence(struct compiler *comp, enum comp_precedence prec);
 
+static void __comp_class(struct compiler *comp);
 static void __comp_call(struct compiler *comp);
 static void __comp_fun_expression(struct compiler *comp);
 static void __comp_if_expression(struct compiler *comp);
@@ -84,12 +89,19 @@ static void __comp_grouping(struct compiler *comp);
 static void __comp_statement(struct compiler *comp);
 static void __comp_and(struct compiler *comp);
 static void __comp_or(struct compiler *comp);
+static void __comp_block_expression(struct compiler *comp);
+static void __comp_identifier(struct compiler *comp);
+static void __comp_liter(struct compiler *comp);
+static void __comp_class(struct compiler *comp);
+static void __comp_getset(struct compiler *comp);
+static void __comp_index_sq(struct compiler *comp);
 
 struct pratt_rule {
     void (*prefix_fn)(struct compiler *comp);
     void (*infix_fn)(struct compiler *comp);
     enum comp_precedence prec;
 };
+
 
 enum exec_code compile(const char *source, struct chunk *c);
 
